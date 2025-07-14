@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -49,13 +50,16 @@ func SendToMods(message string, ts int64) []types.ModCert {
 
 			// Send the request to the mod
 			go func() {
-				response, err := network.SendTo(mod.IP, mod.Port, "submit", msg, "mod")
+				response, err := network.SendTo(mod.IP, mod.Port, "/route=submit", msg, "mod")
 				if err != nil {
 					log.Printf("Failed to contact mod at %s:%s: %v", mod.IP, mod.Port, err)
 					return
 				}
+				fmt.Println(response)
 
 				modcert, ok := response.(types.ModCert)
+				fmt.Println(modcert)
+				fmt.Println(ok)
 				if !ok {
 					log.Printf("Invalid mod response format from %s:%s", mod.IP, mod.Port)
 					return
