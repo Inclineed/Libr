@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"crypto/ed25519"
 	"log"
 	"path/filepath"
 	"strconv"
@@ -16,6 +18,12 @@ import (
 var (
 	CronRunning bool
 	CronMu      sync.Mutex
+)
+
+// refreshCronCancel cancels the mod presence refresh goroutine.
+var (
+	refreshCronCancel context.CancelFunc
+	refreshCronMu     sync.Mutex
 )
 
 func MaybeStartCron() {
@@ -151,5 +159,52 @@ func RetryPendingModerations() {
 				log.Printf("Failed to update pending file: %v", err)
 			}
 		}
+	}
+}
+
+// StartRefreshCron begins a background goroutine that calls RefreshModPresence
+// on the discovery server every intervalSec seconds, keeping this mod's entry alive.
+// Calling StartRefreshCron while already running is a no-op.
+func StartRefreshCron(pubKeyB64 string, privKey ed25519.PrivateKey, intervalSec int) {
+	refreshCronMu.Lock()
+	defer refreshCronMu.Unlock()
+
+	if refreshCronCancel != nil {
+		return // already running
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	refreshCronCancel = cancel
+
+	go func() {
+		ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := util.RefreshModPresence(pubKeyB64, privKey); err != nil {
+					log.Printf("⚠️ RefreshModPresence failed: %v", err)
+				} else {
+					log.Println("🔄 Mod presence refreshed")
+				}
+			case <-ctx.Done():
+				log.Println("🔴 Mod presence refresh cron stopped")
+				return
+			}
+		}
+	}()
+
+	log.Printf("⏱  Mod presence refresh cron started (interval: %ds)", intervalSec)
+}
+
+// StopRefreshCron stops the mod presence refresh goroutine started by StartRefreshCron.
+func StopRefreshCron() {
+	refreshCronMu.Lock()
+	defer refreshCronMu.Unlock()
+
+	if refreshCronCancel != nil {
+		refreshCronCancel()
+		refreshCronCancel = nil
 	}
 }

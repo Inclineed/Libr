@@ -32,19 +32,20 @@ import (
 type App struct {
 	ctx         context.Context
 	relayStatus string
+	isMod       bool
 }
 
 func NewApp() *App {
 	cache.InitCacheFile()
 	keycache.InitKeys()
 	config.LoadConfig()
-	util.SetupMongo(config.MongoURI)
+	util.InitServerClient(config.GetServerURL())
 	amImod, _ := util.AmIMod(base64.StdEncoding.EncodeToString(keycache.PubKey))
 	if amImod {
 		config.InitDB()
 	}
 	core.MaybeStartCron()
-	return &App{relayStatus: "offline"}
+	return &App{relayStatus: "offline", isMod: amImod}
 }
 
 func (a *App) FetchPubKey() string {
@@ -138,13 +139,39 @@ func (a *App) RegenKeys() string {
 }
 
 func (a *App) Connect(relayAdds []string) error {
+	if len(relayAdds) == 0 {
+        return fmt.Errorf("No relay addresses provided")
+    }
 	err := Peers.StartNode(relayAdds)
 	if err != nil {
 		a.relayStatus = "offline"
 		return err
 	}
 	a.relayStatus = "online"
+
+	if a.isMod && Peers.Peer != nil {
+		peerId := Peers.Peer.Host.ID().String()
+		pubKeyB64 := base64.StdEncoding.EncodeToString(keycache.PubKey)
+		if err := util.RegisterAsMod(peerId, pubKeyB64, keycache.PrivKey); err != nil {
+			log.Printf("⚠️ RegisterAsMod failed: %v", err)
+		} else {
+			core.StartRefreshCron(pubKeyB64, keycache.PrivKey, config.RegistryRefreshSeconds)
+		}
+	}
 	return nil
+}
+
+// shutdown is called by Wails before the window closes.
+// It deregisters the mod from the discovery server (best-effort).
+func (a *App) shutdown(_ context.Context) bool {
+	if a.isMod {
+		pubKeyB64 := base64.StdEncoding.EncodeToString(keycache.PubKey)
+		core.StopRefreshCron()
+		if err := util.DeregisterAsMod(pubKeyB64, keycache.PrivKey); err != nil {
+			log.Printf("⚠️ DeregisterAsMod on shutdown failed: %v", err)
+		}
+	}
+	return false // do not prevent the window from closing
 }
 
 func (a *App) GetRelayStatus() string {
