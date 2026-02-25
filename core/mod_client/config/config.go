@@ -14,7 +14,7 @@ const DeleteThreshold = 40.0
 
 // ServerURL is the base URL of the librserver discovery server.
 // Override with the SERVER_URL environment variable.
-const ServerURL = "http://localhost:3000"
+const ServerURL = "https://libr-relay007-1.onrender.com"
 
 // RegistryRefreshSeconds is how often (in seconds) a mod refreshes its
 // presence in the discovery server. Should be less than the server-side TTL.

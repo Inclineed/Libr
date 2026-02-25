@@ -34,7 +34,7 @@ func StartNode(relayMultiAddrList []string) error {
 	ctx := context.Background()
 
 	if err := Peer.Start(ctx); err != nil {
-		log.Fatal(err)
+		log.Printf("[ERROR] Peer.Start failed: %v", err)
 		return err
 	}
 	return nil

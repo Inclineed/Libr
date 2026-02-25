@@ -254,13 +254,18 @@ func (a *App) Report(msgcert types.MsgCert, reason *string) string {
 		}
 	}
 
+	var reasonStr string
+	if reason != nil {
+		reasonStr = *reason
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
 	modChan := make(chan []types.ModCert, 1)
 	mods, _ := util.GetOnlineMods()
 	go func() {
-		modcerts := core.ManualSendToMods(msgcert, mods, *reason, true)
+		modcerts := core.ManualSendToMods(msgcert, mods, reasonStr, true)
 		modChan <- modcerts
 	}()
 
@@ -271,8 +276,14 @@ func (a *App) Report(msgcert types.MsgCert, reason *string) string {
 		return ":x: Moderator timeout"
 	}
 
+	// Empty modcertlist means all mods acknowledged (pending manual review) — not a rejection.
+	// A nil modcertlist (no mods reachable at all) is the real failure case.
+	if modcertlist == nil {
+		return ":x: No moderators available to process this report."
+	}
+
 	if len(modcertlist) == 0 {
-		return ":x: Message rejected by moderators."
+		return ":white_check_mark: Report submitted. Awaiting moderator review."
 	}
 
 	return fmt.Sprintf(":white_check_mark: Sent to Mods for approval. Time: %d", time.Now().Unix())

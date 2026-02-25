@@ -7,9 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"strconv"
-	"time"
 
 	"github.com/libr-forum/Libr/core/crypto/cryptoutils"
 	"github.com/libr-forum/Libr/core/mod_client/config"
@@ -86,14 +84,6 @@ func StoreMsgResult(cert types.MsgCert) (*models.ModResponse, error) {
 	var moderated sql.NullInt64
 	var modsign sql.NullString
 	var sign string
-
-	if rand.Intn(2) == 0 {
-		fmt.Println("Running the Test logic...")
-		TestManModerateMsg(cert)
-		// Put your actual code here
-	} else {
-		fmt.Println("Skipping this time.")
-	}
 
 	row := config.DB.QueryRow(`
     SELECT sign, moderated, modsign
@@ -191,15 +181,6 @@ func GetUnmoderatedMsgs() ([]models.MsgCert, error) {
 		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 	return msgs, nil
-}
-
-func TestManModerateMsg(cert types.MsgCert) {
-	fmt.Println("Testing manual moderation for message:", cert.Sign)
-	rand.Seed(time.Now().UnixNano()) // seed with current time
-	status := rand.Intn(2)
-	modsign, _ := ReportModSign(&cert, strconv.Itoa(status), keycache.PrivKey, keycache.PubKey)
-	fmt.Println("Mod signature:", modsign)
-	UpdateModerationStatus(cert.Sign, modsign, status)
 }
 
 func ReportModSign(cert *types.MsgCert, status string, privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey) (string, error) {

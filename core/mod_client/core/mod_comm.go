@@ -114,6 +114,7 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 			MsgCert:      cert,
 			PartialCerts: modcertList,
 			AwaitingMods: ackMods,
+			AckCount:     len(ackMods), // needed by cron for approval ratio; prevents float div-by-zero
 			CreatedAt:    time.Now(),
 		}
 
