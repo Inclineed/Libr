@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,11 +15,17 @@ import (
 
 func main() {
 	keycache.InitKeys()
-	utils.SetupMongo("mongodb+srv://peer:peerhehe@cluster0.vswojqe.mongodb.net/")
-	relayAddrs, err := utils.GetRelayAddr()
 
-	if err != nil {
+	serverURL := os.Getenv("SERVER_URL")
+	if serverURL == "" {
+		serverURL = "http://localhost:3000"
+	}
+	utils.InitServerClient(serverURL)
+	relayAddrs, err := utils.GetRelayAddr()
+	if err != nil || len(relayAddrs) == 0 {
 		fmt.Println("Error while getting relay address, ", err)
+		fmt.Println("No relay addresses available. Is SERVER_URL reachable?")
+		os.Exit(1)
 	}
 	fmt.Println(relayAddrs)
 
@@ -29,6 +36,14 @@ func main() {
 
 	<-sigChan
 	fmt.Println("Interrupt received. Exiting gracefully.")
+
+	pubKeyB64 := base64.StdEncoding.EncodeToString(keycache.PubKey)
+	if err := utils.DeregisterAsNode(pubKeyB64, keycache.PrivKey); err != nil {
+		fmt.Println("⚠️  Failed to deregister node:", err)
+	} else {
+		fmt.Println("✅ Node deregistered from discovery server")
+	}
+
 	if peer.GlobalRT != nil {
 		peer.GlobalRT.SaveToDBAsync()
 		time.Sleep(1 * time.Second)

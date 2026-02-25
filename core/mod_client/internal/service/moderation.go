@@ -157,7 +157,9 @@ func AutoModerateMsg(msg models.UserMsg) (string, error) {
 
 	clean, err := AnalyzeWithGoogleNLP(msg.Content)
 	if err != nil {
-		return "", err
+		// Google NLP unavailable (e.g. missing API key); fall back to allow
+		fmt.Printf("[WARN] Google NLP unavailable: %v — defaulting to allow\n", err)
+		return "1", nil
 	}
 	if clean {
 		return "1", nil

@@ -294,17 +294,19 @@ func (cp *ChatPeer) handleChatStream(s network.Stream) {
 
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
-			fmt.Println("[DEBUG]Error reading the bytes from the stream")
+			fmt.Println("[DEBUG]Error reading the bytes from the stream:", err)
+			return
 		}
 		line = bytes.TrimRight(line, "\n")
 		line = bytes.TrimRight(line, "\x00")
-		var reqStruct reqFormat
-		err = json.Unmarshal(line, &reqStruct)
 
 		fmt.Println("[DEBUG] Raw input:", string(line))
 
+		var reqStruct reqFormat
+		err = json.Unmarshal(line, &reqStruct)
 		if err != nil {
-			fmt.Println("[DEBUG]Error unmarshalling to reqStruc")
+			fmt.Println("[DEBUG]Error unmarshalling to reqStruc:", err)
+			return
 		}
 
 		var reqData map[string]interface{}

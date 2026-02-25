@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 import { useAppStore } from '../store/useAppStore';
 import { apiService } from '../services/api';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -37,9 +38,11 @@ export const ModConfig: React.FC = () => {
   const saveApiKey = async () => {
     setIsSavingKey(true);
     try {
-      await apiService.SaveGoogleApiKey(googleApiKey); // or any custom endpoint
+      await apiService.SaveGoogleApiKey(googleApiKey);
+      toast.success('API key saved successfully');
     } catch (error) {
       console.error('Failed to save API key:', error);
+      toast.error('Failed to save API key');
     } finally {
       setIsSavingKey(false);
     }

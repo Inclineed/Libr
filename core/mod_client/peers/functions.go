@@ -144,10 +144,18 @@ func ServePostReq(addr string, paramsBytes []byte, bodyBytes []byte) []byte {
 	fmt.Println("Body:", body)
 	switch route {
 	case "auto":
-		return handlers.MsgIN(bodyBytes)
+		resp := handlers.MsgIN(bodyBytes)
+		if resp == nil {
+			fmt.Println("[ERROR] MsgIN returned nil — moderation failed (check API key / logs)")
+		}
+		return resp
 
 	case "manual":
-		return handlers.MsgReport(bodyBytes)
+		resp := handlers.MsgReport(bodyBytes)
+		if resp == nil {
+			fmt.Println("[ERROR] MsgReport returned nil — moderation failed")
+		}
+		return resp
 
 	default:
 		fmt.Println("Unknown POST route:", route)

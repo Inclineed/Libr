@@ -99,6 +99,26 @@ func StartNode(relayMultiAddrList []string) {
 	}
 
 	initDHT()
+
+	// Register this node with the discovery server so clients can find it.
+	pubKeyB64 := base64.StdEncoding.EncodeToString(keycache.PubKey)
+	nodeIdB64 := base64.StdEncoding.EncodeToString(globalLocalNode.NodeId[:])
+	if err := utils.RegisterAsNode(nodeIdB64, PeerID, pubKeyB64, keycache.PrivKey); err != nil {
+		fmt.Println("⚠️  Failed to register node with server:", err)
+	} else {
+		fmt.Println("✅ Registered node with discovery server")
+	}
+
+	// Periodically refresh presence so the server doesn't expire this entry.
+	go func() {
+		ticker := time.NewTicker(90 * time.Second) // half of default 180 s TTL
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := utils.RefreshNodePresence(pubKeyB64, keycache.PrivKey); err != nil {
+				fmt.Println("⚠️  Node refresh failed:", err)
+			}
+		}
+	}()
 }
 
 func GET(targetPeerID string, route string) ([]byte, error) { //"/ts=123&&id=123"
