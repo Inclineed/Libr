@@ -68,10 +68,10 @@ import (
 func StoreMsgResult(cert types.MsgCert) (*models.ModResponse, error) {
 	fmt.Println("Trying to store message result:")
 	insertQuery := `
-    INSERT INTO msgresult (sign, content, reason)
-    VALUES (?, ?, ?);`
+    INSERT INTO msgresult (sign, content, reason, ts)
+    VALUES (?, ?, ?, ?);`
 
-	_, err := config.DB.Exec(insertQuery, cert.Sign, cert.Msg.Content, cert.Reason)
+	_, err := config.DB.Exec(insertQuery, cert.Sign, cert.Msg.Content, cert.Reason, cert.Msg.Ts)
 	if err == nil {
 		fmt.Println("Message result stored successfully")
 		return &models.ModResponse{
@@ -84,13 +84,14 @@ func StoreMsgResult(cert types.MsgCert) (*models.ModResponse, error) {
 	var moderated sql.NullInt64
 	var modsign sql.NullString
 	var sign string
+	var ts int64
 
 	row := config.DB.QueryRow(`
-    SELECT sign, moderated, modsign
+    SELECT sign, moderated, modsign, ts
     FROM msgresult
     WHERE sign = ?;`, cert.Sign)
 
-	err = row.Scan(&sign, &moderated, &modsign)
+	err = row.Scan(&sign, &moderated, &modsign, &ts)
 	if err != nil {
 		fmt.Println("Error scanning row:", err)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -154,7 +155,7 @@ func UpdateModerationStatus(sign string, modsign string, moderated int) (*models
 // GetUnmoderatedMsgs returns all messages from msgresult where moderated and modsign are NULL
 func GetUnmoderatedMsgs() ([]models.MsgCert, error) {
 	query := `
-        SELECT sign, content, reason
+        SELECT sign, content, reason, ts
         FROM msgresult
         WHERE moderated IS NULL AND modsign IS NULL;`
 
@@ -169,11 +170,13 @@ func GetUnmoderatedMsgs() ([]models.MsgCert, error) {
 	for rows.Next() {
 		var cert models.MsgCert
 		var content, reason string
-		if err := rows.Scan(&cert.Sign, &content, &reason); err != nil {
+		var ts int64
+		if err := rows.Scan(&cert.Sign, &content, &reason, &ts); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		cert.Msg.Content = content
 		cert.Reason = reason
+		cert.Msg.Ts = ts
 		fmt.Println("cert", cert)
 		msgs = append(msgs, cert)
 	}

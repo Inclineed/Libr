@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -106,8 +107,9 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 			cert.Sign, len(modcertList), ackCount, unresponsive, totalMods)
 	}
 
-	// Save pending state only if there are ACKs
-	if len(ackMods) > 0 {
+	// Save pending state only on first try — retries are persisted by the cron after
+	// merging results, preserving the original AckCount.
+	if len(ackMods) > 0 && firstTry {
 		log.Printf("🔄 Saving %d ACK mods for retry", len(ackMods))
 		pending := types.PendingModeration{
 			MsgSign:      cert.Sign,
@@ -138,7 +140,10 @@ func AutoSendToMods(message string, ts int64) ([]types.ModCert, error) {
 
 	onlineMods, err := util.GetOnlineMods()
 	if err != nil {
-		log.Fatalf("failed to get online mods: %v", err)
+		return nil, fmt.Errorf("failed to get online mods: %w", err)
+	}
+	if len(onlineMods) == 0 {
+		return nil, fmt.Errorf("no online moderators available")
 	}
 	noOfMods := len(onlineMods)
 

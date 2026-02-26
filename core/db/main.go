@@ -18,7 +18,7 @@ func main() {
 
 	serverURL := os.Getenv("SERVER_URL")
 	if serverURL == "" {
-		serverURL = "http://localhost:3000"
+		serverURL = "https://libr-relay007-1.onrender.com"
 	}
 	utils.InitServerClient(serverURL)
 	relayAddrs, err := utils.GetRelayAddr()

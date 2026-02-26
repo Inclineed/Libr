@@ -74,6 +74,11 @@ func MsgReport(bodyBytes []byte) []byte {
 		logger.LogToFile("[DEBUG]Moderation Error 2")
 		return nil
 	}
+	if moderationStatus == nil {
+		log.Printf("MsgReport: nil moderation status returned for sign %s", req.Sign)
+		logger.LogToFile("[DEBUG]MsgReport nil status")
+		return nil
+	}
 
 	// // ✅ Save log for this mod
 	// _ = service.AppendToModLog(req, moderationStatus) for now
