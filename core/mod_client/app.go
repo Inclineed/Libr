@@ -186,9 +186,9 @@ func (a *App) TitleBarTheme(isDark bool) {
 	}
 }
 
-func (a *App) SendInput(input string) (string, []types.ModCert) {
+func (a *App) SendInput(input string) (types.SendResult, error) {
 	if a.relayStatus != "online" {
-		return "Offline", nil
+		return types.SendResult{Status: "offline"}, nil
 	}
 
 	ts := time.Now().Unix()
@@ -206,18 +206,18 @@ func (a *App) SendInput(input string) (string, []types.ModCert) {
 	}()
 
 	if err != nil {
-		return ":x: Moderator timeout", nil
+		return types.SendResult{Status: "timeout"}, nil
 	}
 
 	var modcertlist []types.ModCert
 	select {
 	case modcertlist = <-modChan:
 	case <-ctx.Done():
-		return ":x: Moderator timeout", nil
+		return types.SendResult{Status: "timeout"}, nil
 	}
 
 	if len(modcertlist) == 0 {
-		return ":x: Message rejected by moderators.", nil
+		return types.SendResult{Status: "rejected"}, nil
 	}
 
 	fmt.Println("ModCerts received:", modcertlist)
@@ -227,7 +227,12 @@ func (a *App) SendInput(input string) (string, []types.ModCert) {
 	key := util.GenerateNodeID(strconv.FormatInt(tsmin, 10))
 	core.SendToDb(key, msgCert, "/route=store")
 
-	return fmt.Sprintf(":white_check_mark: Sent to DB. Time: %d Sign: %s", msgCert.Msg.Ts, msgCert.Sign), modcertlist
+	return types.SendResult{
+		Status:   "sent",
+		ModCerts: modcertlist,
+		Sign:     msgCert.Sign,
+		Ts:       msgCert.Msg.Ts,
+	}, nil
 }
 
 func (a *App) Report(msgcert types.MsgCert, reason *string) string {

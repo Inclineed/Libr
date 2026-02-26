@@ -198,36 +198,25 @@ export const apiService = {
   },
 
   async sendMessage(communityId: string, content: string): Promise<Message> {
-    let response: string = '';
-    let modcerts: types.ModCert[] = [];
-
     const result = await SendInput(content);
 
-    if (typeof result === 'string') {
-      response = result;
-    } else if (Array.isArray(result)) {
-      modcerts = result;
-    }
-
-    const approved = response.includes("Sent");
-    const rejected = response.includes("rejected");
-    const timeout = response.includes("timeout");
+    const approved = result.status === 'sent';
+    const timeout = result.status === 'timeout';
+    const modcerts: types.ModCert[] = result.mod_certs ?? [];
 
     const user = useAppStore.getState().user;
-    const signMatch = response.match(/Sign:\s*(\S+)/);
-    const tsMatch = response.match(/Time:\s*(\d+)/);
 
     // No caching: just return the new message object
     const newMessage: Message = {
       content,
       authorPublicKey: user.publicKey,
       authorAlias: user.alias,
-      timestamp: BigInt(tsMatch?.[1] ?? Date.now()),
+      timestamp: BigInt(result.ts > 0 ? result.ts : Math.floor(Date.now() / 1000)),
       communityId,
       status: approved ? 'approved' : timeout ? 'pending' : 'rejected',
       avatarSvg: user.avatarSvg,
       moderationNote: modcerts,
-      sign: signMatch?.[1] ?? '',
+      sign: result.sign ?? '',
     };
 
     return newMessage;

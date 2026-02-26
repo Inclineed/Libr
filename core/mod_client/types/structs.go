@@ -56,6 +56,13 @@ type SubmitMsg struct {
 	Sign    *string `json:"sign,omitempty"`
 }
 
+type SendResult struct {
+	Status   string    `json:"status"`
+	ModCerts []ModCert `json:"mod_certs"`
+	Sign     string    `json:"sign"`
+	Ts       int64     `json:"ts"`
+}
+
 type ReportCert struct {
 	Msgcert     MsgCert   `json:"msgcert"`
 	RepModCerts []ModCert `json:"repmod_certs"`

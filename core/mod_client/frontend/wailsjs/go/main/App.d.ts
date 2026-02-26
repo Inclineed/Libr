@@ -41,6 +41,6 @@ export function SaveGoogleApiKey(arg1:string):Promise<void>;
 
 export function SaveModConfig(arg1:models.ModConfig):Promise<void>;
 
-export function SendInput(arg1:string):Promise<string|Array<types.ModCert>>;
+export function SendInput(arg1:string):Promise<types.SendResult>;
 
 export function TitleBarTheme(arg1:boolean):Promise<void>;
