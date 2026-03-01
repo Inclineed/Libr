@@ -5,7 +5,7 @@ import { SvgXml } from 'react-native-svg';
 import { Colors } from '@/constants/theme';
 import { useAppStore } from '@/store/useAppStore';
 import LibrCore from '@/modules/LibrCore';
-import { Hash, Shield, Wrench, AlertTriangle } from 'lucide-react-native';
+import { Hash, Shield, Wrench, AlertTriangle, Flag } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
@@ -72,6 +72,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const navItems = [
     { name: 'Home Feed', icon: <Hash size={20} color={Colors.dark.icon} />, route: '/(main)/' },
+    { name: 'My Reports', icon: <Flag size={20} color={Colors.dark.icon} />, route: '/(main)/my-reports' },
     ...(isModerator ? [
       { name: 'Moderation Logs', icon: <Shield size={20} color={Colors.dark.icon} />, route: '/(main)/moderation' },
       { name: 'Moderation Config', icon: <Wrench size={20} color={Colors.dark.icon} />, route: '/(main)/config' },

@@ -1,9 +1,7 @@
-/**
- * Minimal reactive store for the Libr mobile app.
- * Uses React Context + useReducer so no external dependencies are needed.
- */
-import React, { createContext, useContext, useReducer, useCallback, ReactNode } from 'react';
-import { RetMsgCert } from '@/modules/LibrCore';
+import React, { createContext, useContext, useReducer, useCallback, ReactNode, useEffect } from 'react';
+import { AppState as ReactNativeAppState, AppStateStatus } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import LibrCore, { RetMsgCert } from '@/modules/LibrCore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,6 +20,8 @@ interface AppState {
   messages: RetMsgCert[];
   /** Whether a message fetch is in progress. */
   isFetching: boolean;
+  /** Set of message signatures reported by the current user. */
+  reportedSigns: Set<string>;
 }
 
 type Action =
@@ -31,7 +31,9 @@ type Action =
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_MESSAGES'; payload: RetMsgCert[] }
   | { type: 'SET_FETCHING'; payload: boolean }
-  | { type: 'REMOVE_MESSAGE'; payload: string }; // sign of the message to remove
+  | { type: 'REMOVE_MESSAGE'; payload: string }
+  | { type: 'ADD_REPORTED_SIGN'; payload: string }
+  | { type: 'SET_REPORTED_SIGNS'; payload: Set<string> };
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
@@ -42,6 +44,7 @@ const initialState: AppState = {
   lastError: null,
   messages: [],
   isFetching: false,
+  reportedSigns: new Set(),
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -53,6 +56,12 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_MESSAGES': return { ...state, messages: action.payload };
     case 'SET_FETCHING': return { ...state, isFetching: action.payload };
     case 'REMOVE_MESSAGE': return { ...state, messages: state.messages.filter(m => m.sign !== action.payload) };
+    case 'ADD_REPORTED_SIGN': {
+      const newSet = new Set(state.reportedSigns);
+      newSet.add(action.payload);
+      return { ...state, reportedSigns: newSet };
+    }
+    case 'SET_REPORTED_SIGNS': return { ...state, reportedSigns: action.payload };
     default: return state;
   }
 }
@@ -68,12 +77,49 @@ interface StoreContextValue {
   setMessages: (msgs: RetMsgCert[]) => void;
   setFetching: (v: boolean) => void;
   removeMessage: (sign: string) => void;
+  addReportedSign: (sign: string) => void;
 }
 
 const StoreContext = createContext<StoreContextValue | undefined>(undefined);
+const REPORTED_SIGNS_KEY = '@libr_reported_signs';
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Load reported signs on mount
+  useEffect(() => {
+    AsyncStorage.getItem(REPORTED_SIGNS_KEY).then((data: string | null) => {
+      if (data) {
+        try {
+          const arr = JSON.parse(data);
+          if (Array.isArray(arr)) {
+            dispatch({ type: 'SET_REPORTED_SIGNS', payload: new Set(arr) });
+          }
+        } catch { /* ignore parse error */ }
+      }
+    });
+  }, []);
+
+  // Manage Go Cron Job Lifecycle
+  useEffect(() => {
+    const subscription = ReactNativeAppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'active') {
+        LibrCore.startCron().catch(console.warn);
+      } else if (nextAppState === 'background') {
+        LibrCore.stopCron().catch(console.warn);
+      }
+    });
+
+    // Start immediately if already active
+    if (ReactNativeAppState.currentState === 'active') {
+      LibrCore.startCron().catch(console.warn);
+    }
+
+    return () => {
+      subscription.remove();
+      LibrCore.stopCron().catch(console.warn);
+    };
+  }, []);
 
   const setPublicKey = useCallback((key: string) => dispatch({ type: 'SET_PUBLIC_KEY', payload: key }), []);
   const setPeerId = useCallback((id: string) => dispatch({ type: 'SET_PEER_ID', payload: id }), []);
@@ -82,9 +128,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const setMessages = useCallback((m: RetMsgCert[]) => dispatch({ type: 'SET_MESSAGES', payload: m }), []);
   const setFetching = useCallback((v: boolean) => dispatch({ type: 'SET_FETCHING', payload: v }), []);
   const removeMessage = useCallback((sign: string) => dispatch({ type: 'REMOVE_MESSAGE', payload: sign }), []);
+  const addReportedSign = useCallback((sign: string) => {
+    dispatch({ type: 'ADD_REPORTED_SIGN', payload: sign });
+    // Persist to AsyncStorage
+    AsyncStorage.getItem(REPORTED_SIGNS_KEY).then((data: string | null) => {
+      const arr = data ? JSON.parse(data) : [];
+      if (!arr.includes(sign)) {
+        arr.push(sign);
+        AsyncStorage.setItem(REPORTED_SIGNS_KEY, JSON.stringify(arr));
+      }
+    }).catch(() => { });
+  }, []);
 
   return (
-    <StoreContext.Provider value={{ state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage }}>
+    <StoreContext.Provider value={{ state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage, addReportedSign }}>
       {children}
     </StoreContext.Provider>
   );

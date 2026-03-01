@@ -16,6 +16,7 @@ import (
 	"github.com/libr-forum/Libr/core/mod_client/avatar"
 	"github.com/libr-forum/Libr/core/mod_client/config"
 	"github.com/libr-forum/Libr/core/mod_client/core"
+	cache "github.com/libr-forum/Libr/core/mod_client/core/cache_handler"
 	"github.com/libr-forum/Libr/core/mod_client/keycache"
 	peer "github.com/libr-forum/Libr/core/mod_client/peers"
 	"github.com/libr-forum/Libr/core/mod_client/types"
@@ -247,7 +248,7 @@ func FetchMessages() string {
 // ReportMessage sends a report for the message identified by msgSign.
 // msgCertJSON should be a JSON-encoded MsgCert for the message.
 // Returns "ok" on success, or an error string prefixed "error:".
-func ReportMessage(msgCertJSON string) string {
+func ReportMessage(msgCertJSON string, reason string) string {
 	var msgCert types.MsgCert
 	if err := json.Unmarshal([]byte(msgCertJSON), &msgCert); err != nil {
 		return fmt.Sprintf("error:unmarshal msgcert: %v", err)
@@ -258,7 +259,8 @@ func ReportMessage(msgCertJSON string) string {
 		return "error:no online mods"
 	}
 
-	repModCerts := core.SendToMods(msgCert, mods)
+	// firstTry = true to allow caching the new request
+	repModCerts := core.ManualSendToMods(msgCert, mods, reason, true)
 	repCert := core.CreateRepCert(msgCert, repModCerts, "report")
 
 	ts := msgCert.Msg.Ts - (msgCert.Msg.Ts % 60)
@@ -266,6 +268,111 @@ func ReportMessage(msgCertJSON string) string {
 	if err := core.SendToDb(key, repCert, "/route=report"); err != nil {
 		return fmt.Sprintf("error:send to db: %v", err)
 	}
+	return "ok"
+}
+
+// StartCron initializes the moderation cron job to process pending reports.
+// Call this when the app comes to the foreground.
+func StartCron() string {
+	core.MaybeStartCron()
+	return "ok"
+}
+
+// StopCron gracefully halts the moderation cron job.
+// Call this when the app goes to the background.
+func StopCron() string {
+	core.StopModerationCron()
+	return "ok"
+}
+
+// PendingReportStatus exposes the current moderation status to React Native
+type PendingReportStatus struct {
+	Total    int `json:"total"`
+	Approved int `json:"approved"`
+	Rejected int `json:"rejected"`
+}
+
+// GetPendingReports retrieves a map of msgSign -> status counts for all pending reports.
+func GetPendingReports() string {
+	pendings, err := cache.GetAllPendingModerations()
+	if err != nil {
+		return fmt.Sprintf("error:%v", err)
+	}
+
+	statusMap := make(map[string]PendingReportStatus)
+	for _, p := range pendings {
+		// Tally current partial certs
+		var approved, rejected int
+		for _, cert := range p.PartialCerts {
+			if cert.Status == "1" {
+				approved++
+			} else if cert.Status == "0" {
+				rejected++
+			}
+		}
+
+		statusMap[p.MsgSign] = PendingReportStatus{
+			Total:    p.AckCount, // Total expected responses based on Acks
+			Approved: approved,
+			Rejected: rejected,
+		}
+	}
+
+	b, err := json.Marshal(statusMap)
+	if err != nil {
+		return fmt.Sprintf("error:%v", err)
+	}
+	return string(b)
+}
+
+// FetchReports retrieves recent reported messages for moderation.
+func FetchReports() string {
+	reports := core.FetchRecentReports(context.Background())
+	b, err := json.Marshal(reports)
+	if err != nil {
+		return fmt.Sprintf("error:%v", err)
+	}
+	return string(b)
+}
+
+// ModerateMessage allows a moderator to approve or reject a reported message.
+func ModerateMessage(msgCertJSON string, action string) string {
+	var msgCert types.MsgCert
+	if err := json.Unmarshal([]byte(msgCertJSON), &msgCert); err != nil {
+		return fmt.Sprintf("error:unmarshal msgcert: %v", err)
+	}
+
+	status := "0" // reject
+	if action == "approve" {
+		status = "1"
+	}
+
+	mods, err := util.GetOnlineMods()
+	if err != nil || len(mods) == 0 {
+		return "error:no online mods"
+	}
+
+	// Sign the moderation action
+	payload := msgCert.Sign + status
+	_, sign, err := cryptoutils.SignMessage(keycache.PrivKey, payload)
+	if err != nil {
+		return fmt.Sprintf("error:signing: %v", err)
+	}
+
+	modCert := types.ModCert{
+		Sign:      sign,
+		PublicKey: base64.StdEncoding.EncodeToString(keycache.PubKey),
+		Status:    status,
+	}
+
+	repCert := core.CreateRepCert(msgCert, []types.ModCert{modCert}, "moderation")
+
+	ts := msgCert.Msg.Ts - (msgCert.Msg.Ts % 60)
+	key := util.GenerateNodeID(strconv.FormatInt(ts, 10))
+	if err := core.SendToDb(key, repCert, "/route=moderation"); err != nil {
+		return fmt.Sprintf("error:send to db: %v", err)
+	}
+
 	return "ok"
 }
 

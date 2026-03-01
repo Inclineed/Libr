@@ -94,9 +94,21 @@ interface LibrCoreInterface {
   /** Fetch messages from the last hour. Returns JSON array of RetMsgCert. */
   fetchMessages(): Promise<string>;
   /** Report a message. msgCertJSON is a JSON-encoded MsgCert. Returns "ok" or "error:...". */
-  reportMessage(msgCertJSON: string): Promise<string>;
+  reportMessage(msgCertJSON: string, reason: string): Promise<string>;
+  /** Fetch recent reports. Returns JSON array of ReportCert. */
+  fetchReports(): Promise<string>;
+  /** Fetch pending reports. Returns JSON array of ReportCert. */
+  getPendingReports(): Promise<string>;
+  /** Moderate a message. action is "approve" or "reject". Returns "ok" or "error:...". */
+  moderateMessage(msgCertJSON: string, action: 'approve' | 'reject'): Promise<string>;
   /** Delete a message. msgCertJSON is a JSON-encoded MsgCert. Returns "ok" or "error:...". */
   deleteMessage(msgCertJSON: string): Promise<string>;
+
+  // ── Cron & Tasks ────────────────────────────────────────────────────────
+  /** Start the background moderation cron job. */
+  startCron(): Promise<string>;
+  /** Stop the background moderation cron job. */
+  stopCron(): Promise<string>;
 
   // ── Identity ─────────────────────────────────────────────────────────────
   /** Returns a human-readable alias for a base64 public key. */
@@ -123,14 +135,22 @@ const MockLibrCore: LibrCoreInterface = {
     return JSON.stringify({ status: 'sent', mod_certs: [], sign: 'mock_sign', ts: Date.now() / 1000 });
   },
   fetchMessages: async () => '[]',
-  reportMessage: async (json) => {
-    console.log('[LibrCore Mock] reportMessage', json);
+  reportMessage: async (json, reason) => {
+    console.log('[LibrCore Mock] reportMessage', json, reason);
+    return 'ok';
+  },
+  getPendingReports: async () => '{}',
+  fetchReports: async () => '[]',
+  moderateMessage: async (json, action) => {
+    console.log(`[LibrCore Mock] moderateMessage: ${action}`, json);
     return 'ok';
   },
   deleteMessage: async (json) => {
     console.log('[LibrCore Mock] deleteMessage', json);
     return 'ok';
   },
+  startCron: async () => 'ok',
+  stopCron: async () => 'ok',
   generateAlias: async (k) => k.slice(0, 10),
   generateAvatar: async (k) => '',
 };

@@ -166,6 +166,41 @@ class LibrCoreModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
         }.start()
     }
 
+    @ReactMethod fun reportMessage(msgCertJSON: String, reason: String, promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("reportMessage", msgCertJSON, reason)?.toString() ?: "error:not_built") }
+            catch (e: Exception) { promise.reject("ERR_REPORT", e.message) }
+        }.start()
+    }
+
+    @ReactMethod fun startCron(promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("startCron")?.toString() ?: "error:not_built") }
+            catch (e: Exception) { promise.reject("ERR_START_CRON", e.message) }
+        }.start()
+    }
+
+    @ReactMethod fun stopCron(promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("stopCron")?.toString() ?: "error:not_built") }
+            catch (e: Exception) { promise.reject("ERR_STOP_CRON", e.message) }
+        }.start()
+    }
+
+    @ReactMethod fun fetchReports(promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("fetchReports")?.toString() ?: "[]") }
+            catch (e: Exception) { promise.reject("ERR_FETCH_REPORTS", e.message) }
+        }.start()
+    }
+
+    @ReactMethod fun moderateMessage(msgCertJSON: String, action: String, promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("moderateMessage", msgCertJSON, action)?.toString() ?: "error:not_built") }
+            catch (e: Exception) { promise.reject("ERR_MODERATE", e.message) }
+        }.start()
+    }
+
     @ReactMethod fun generateAlias(key: String, promise: Promise) {
         try { promise.resolve(callBridgeString("generateAlias", key)?.toString() ?: key.take(8)) }
         catch (e: Exception) { promise.reject("ERR_ALIAS", e.message) }

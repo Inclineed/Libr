@@ -196,8 +196,10 @@ interface MessageDetailModalProps {
 }
 
 function MessageDetailModal({ visible, onClose, cert, isMine, onDelete, onReport }: MessageDetailModalProps) {
+  const { state } = useAppStore();
   if (!cert) return null;
   const fullTs = new Date(cert.msg.ts * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' });
+  const isReported = state.reportedSigns.has(cert.sign);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -210,8 +212,17 @@ function MessageDetailModal({ visible, onClose, cert, isMine, onDelete, onReport
           </View>
 
           <View style={styles.statusRow}>
-            <Check size={16} color={C.green} />
-            <Text style={styles.statusLabel}>Approved</Text>
+            {isReported ? (
+              <>
+                <Flag size={16} color={C.red} />
+                <Text style={[styles.statusLabel, { color: C.red }]}>Reported</Text>
+              </>
+            ) : (
+              <>
+                <Check size={16} color={C.green} />
+                <Text style={styles.statusLabel}>Approved</Text>
+              </>
+            )}
           </View>
 
           <ScrollView style={styles.modList} bounces={false}>
@@ -227,9 +238,15 @@ function MessageDetailModal({ visible, onClose, cert, isMine, onDelete, onReport
                 <Text style={[styles.actionBtnText, { color: C.red }]}>Delete</Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={styles.actionBtn} onPress={() => { onClose(); onReport(cert); }}>
+              <TouchableOpacity
+                style={[styles.actionBtn, isReported && { opacity: 0.5 }]}
+                disabled={isReported}
+                onPress={() => { onClose(); onReport(cert); }}
+              >
                 <Flag size={18} color={C.red} />
-                <Text style={[styles.actionBtnText, { color: C.red }]}>Report</Text>
+                <Text style={[styles.actionBtnText, { color: C.red }]}>
+                  {isReported ? 'Reported' : 'Report'}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -239,17 +256,114 @@ function MessageDetailModal({ visible, onClose, cert, isMine, onDelete, onReport
   );
 }
 
+// ── ReportReasonModal ────────────────────────────────────────────────────────
+
+function ReportReasonModal({
+  visible,
+  onClose,
+  onSubmit
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('');
+  const [selectedChip, setSelectedChip] = useState<string | null>(null);
+
+  const chips = ['Spam', 'Inappropriate', 'Harassment', 'False Identity'];
+
+  const handlePressChip = (chip: string) => {
+    setSelectedChip(chip);
+    setReason(chip);
+  };
+
+  const handleCustomChange = (text: string) => {
+    setReason(text);
+    if (chips.includes(text)) {
+      setSelectedChip(text);
+    } else {
+      setSelectedChip(null);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onClose}>
+          <TouchableOpacity style={styles.reportModalContainer} activeOpacity={1}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderTitle}>
+                <Flag size={20} color={C.red} fill={C.red} />
+                <Text style={styles.modalTitle}>Report Message</Text>
+              </View>
+              <TouchableOpacity onPress={onClose}>
+                <X size={24} color={C.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>Why are you reporting this message?</Text>
+
+            <View style={styles.chipContainer}>
+              {chips.map(chip => (
+                <TouchableOpacity
+                  key={chip}
+                  onPress={() => handlePressChip(chip)}
+                  style={[
+                    styles.reasonChip,
+                    selectedChip === chip && styles.reasonChipSelected
+                  ]}
+                >
+                  <Text style={[
+                    styles.reasonChipText,
+                    selectedChip === chip && styles.reasonChipTextSelected
+                  ]}>{chip}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              style={styles.customReasonInput}
+              placeholder="Or enter a custom reason..."
+              placeholderTextColor={C.muted}
+              value={selectedChip ? '' : reason}
+              onChangeText={handleCustomChange}
+              multiline
+            />
+
+            <TouchableOpacity
+              style={[styles.submitReportBtn, !reason.trim() && { opacity: 0.5 }]}
+              disabled={!reason.trim()}
+              onPress={() => {
+                onSubmit(reason.trim());
+                setReason('');
+                setSelectedChip(null);
+              }}
+            >
+              <Text style={styles.submitReportText}>Submit Report</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage } = useAppStore();
+  const { state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage, addReportedSign } = useAppStore();
   const { toggleSidebar, isOpen } = useSidebar();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<RetMsgCert | null>(null);
   const [detailsVisible, setDetailsVisible] = useState(false);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportMessageCert, setReportMessageCert] = useState<RetMsgCert | null>(null);
   const fetchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fabScale = useRef(new Animated.Value(1)).current;
 
@@ -399,19 +513,32 @@ export default function ChatScreen() {
   // ── Report ───────────────────────────────────────────────────────────────
 
   const handleReport = useCallback(async (cert: RetMsgCert) => {
+    setReportMessageCert(cert);
+    setDetailsVisible(false);
+    setTimeout(() => setReportModalVisible(true), 300); // Small delay for detail modal to close
+  }, []);
+
+  const submitReport = async (reason: string) => {
+    if (!reportMessageCert) return;
+    setReportModalVisible(false);
+
     if (typeof (LibrCore as any).reportMessage !== 'function') {
       Alert.alert('Not supported', 'Please rebuild the Go bridge.');
       return;
     }
+
     try {
       const msgCert: MsgCert = {
-        public_key: cert.public_key,
-        msg: cert.msg,
-        mod_certs: cert.mod_certs,
-        sign: cert.sign,
+        public_key: reportMessageCert.public_key,
+        msg: reportMessageCert.msg,
+        mod_certs: reportMessageCert.mod_certs,
+        sign: reportMessageCert.sign,
+        reason: reason,
+        type: 'report'
       };
-      const result: string = await (LibrCore as any).reportMessage(JSON.stringify(msgCert));
+      const result: string = await (LibrCore as any).reportMessage(JSON.stringify(msgCert), reason);
       if (result === 'ok') {
+        addReportedSign(reportMessageCert.sign);
         Alert.alert('Reported', 'Message has been flagged for review.');
       } else {
         Alert.alert('Report failed', result);
@@ -419,7 +546,8 @@ export default function ChatScreen() {
     } catch (err: any) {
       Alert.alert('Error', err?.message ?? 'Unknown error');
     }
-  }, []);
+  };
+
 
   const handleDelete = useCallback(async (cert: RetMsgCert) => {
     if (typeof (LibrCore as any).deleteMessage !== 'function') {
@@ -561,6 +689,12 @@ export default function ChatScreen() {
         isMine={selectedMessage?.public_key === state.publicKey}
         onDelete={handleDelete}
         onReport={handleReport}
+      />
+
+      <ReportReasonModal
+        visible={reportModalVisible}
+        onClose={() => setReportModalVisible(false)}
+        onSubmit={submitReport}
       />
 
       {/* Floating Action Button */}
@@ -843,6 +977,90 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 25,
   },
+  reportModalContainer: {
+    backgroundColor: C.card,
+    borderRadius: 24,
+    padding: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    marginBottom: 24,
+    marginHorizontal: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeaderTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: C.text,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: C.muted,
+    marginBottom: 20,
+  },
+  chipContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 20,
+  },
+  reasonChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  reasonChipSelected: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderColor: C.red,
+  },
+  reasonChipText: {
+    color: C.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  reasonChipTextSelected: {
+    color: C.red,
+  },
+  customReasonInput: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 12,
+    padding: 16,
+    color: C.text,
+    fontSize: 15,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: C.border,
+    marginBottom: 24,
+  },
+  submitReportBtn: {
+    backgroundColor: C.red,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    shadowColor: C.red,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  submitReportText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  }
 });
 
 
