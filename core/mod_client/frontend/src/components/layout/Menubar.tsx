@@ -62,18 +62,23 @@ export const Menubar: React.FC = () => {
     }).catch(() => {});
 
     // Live updates from cron
-    EventsOn("cron_status_update", (queue: PendingModeration[]) => {
+    const unsubCronStatus = EventsOn("cron_status_update", (queue: PendingModeration[]) => {
       setPendingQueue(queue || []);
     });
 
     // Toast notifications for finalized items
-    EventsOn("moderation_finalized", (event: { status: string; id: string }) => {
+    const unsubFinalized = EventsOn("moderation_finalized", (event: { status: string; id: string }) => {
       if (event.status === "approved") {
         toast.success(`Message Approved (${event.id.substring(0, 8)}...)`);
       } else {
         toast.error(`Message Rejected (${event.id.substring(0, 8)}...)`);
       }
     });
+
+    return () => {
+      unsubCronStatus();
+      unsubFinalized();
+    };
   }, []);
   React.useEffect(() => {
     logger.debug('[Menubar] Component mounted.');

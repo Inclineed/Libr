@@ -1,0 +1,178 @@
+package com.libr.app
+
+import com.facebook.react.bridge.*
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
+import java.lang.reflect.Proxy
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Method
+
+class LibrCoreModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+
+    init {
+        android.util.Log.e("LibrApp", "===== LibrCoreModule init started =====")
+        try {
+            val bridgeClass = Class.forName("bridge.Bridge")
+            val handlerClass = Class.forName("bridge.MessageHandler")
+            
+            val handlerProxy = Proxy.newProxyInstance(
+                handlerClass.classLoader,
+                arrayOf(handlerClass),
+                object : InvocationHandler {
+                    override fun invoke(proxy: Any, method: Method, args: Array<out Any>?): Any? {
+                        if (method.name == "onMessage" && args != null && args.size == 2) {
+                            val peerID = args[0] as? String
+                            val msg = args[1] as? String
+                            val params = Arguments.createMap()
+                            params.putString("peerID", peerID)
+                            params.putString("message", msg)
+                            sendEvent("onLibrMessage", params)
+                        }
+                        return null
+                    }
+                }
+            )
+            
+            val setMessageHandler = bridgeClass.getMethod("setMessageHandler", handlerClass)
+            setMessageHandler.invoke(null, handlerProxy)
+            android.util.Log.e("LibrApp", "===== LibrCoreModule init SUCCESS =====")
+        } catch (e: Throwable) {
+            android.util.Log.e("LibrApp", "===== LibrCoreModule setMessageHandler failed: ${e.message} =====", e)
+        }
+    }
+
+    private fun sendEvent(eventName: String, params: WritableMap?) {
+        reactApplicationContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit(eventName, params)
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Required for NativeEventEmitter
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Required for NativeEventEmitter
+    }
+
+    override fun getName(): String {
+        return "LibrCore"
+    }
+
+    @ReactMethod
+    fun initNode(relayAddrsJson: String, promise: Promise) {
+        try {
+            promise.resolve(callBridgeString("initNode", relayAddrsJson)?.toString() ?: "")
+        } catch (e: Exception) {
+            promise.reject("ERR_INIT", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun sendMessage(targetPeerID: String, message: String, promise: Promise) {
+        try {
+            promise.resolve(callBridgeString("sendMessage", targetPeerID, message)?.toString() ?: "")
+        } catch (e: Exception) {
+            promise.reject("ERR_SEND", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun getPeerID(promise: Promise) {
+        try {
+            promise.resolve(callBridgeString("getPeerID")?.toString() ?: "")
+        } catch (e: Exception) {
+            promise.reject("ERR_PEER_ID", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun stopNode(promise: Promise) {
+        try {
+            val m = Class.forName("bridge.Bridge").getMethod("stopNode")
+            m.invoke(null)
+            promise.resolve(null)
+        } catch (e: Exception) {
+            promise.reject("ERR_STOP", e.message)
+        }
+    }
+
+    // ── New methods (available after rebuilding the Go AAR with build-android.ps1) ──
+    // These use reflection so the module compiles against any AAR version.
+    // On the old AAR they resolve to null and the JS mock / guard handles it.
+
+    private fun callBridgeString(method: String, vararg args: Any?): Any? {
+        return try {
+            val argTypes = args.map { it?.javaClass ?: String::class.java }.toTypedArray()
+            val m = Class.forName("bridge.Bridge").getMethod(method, *argTypes)
+            m.invoke(null, *args)
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    @ReactMethod fun initApp(serverURL: String, promise: Promise) {
+        val keyDir = reactApplicationContext.filesDir.absolutePath + "/keys"
+        try { promise.resolve(callBridgeString("initApp", keyDir, serverURL)?.toString() ?: "") }
+        catch (e: Exception) { promise.reject("ERR_INIT_APP", e.message) }
+    }
+
+    @ReactMethod fun getPublicKey(promise: Promise) {
+        try { promise.resolve(callBridgeString("getPublicKey")?.toString() ?: "") }
+        catch (e: Exception) { promise.reject("ERR_GET_KEY", e.message) }
+    }
+
+    @ReactMethod fun regenKeys(promise: Promise) {
+        try { promise.resolve(callBridgeString("regenKeys")?.toString() ?: "") }
+        catch (e: Exception) { promise.reject("ERR_REGEN_KEYS", e.message) }
+    }
+
+    @ReactMethod fun getRelayAddresses(promise: Promise) {
+        try { promise.resolve(callBridgeString("getRelayAddresses")?.toString() ?: "[]") }
+        catch (e: Exception) { promise.reject("ERR_RELAY_ADDRS", e.message) }
+    }
+
+    @ReactMethod fun getOnlineMods(promise: Promise) {
+        try { promise.resolve(callBridgeString("getOnlineMods")?.toString() ?: "[]") }
+        catch (e: Exception) { promise.reject("ERR_ONLINE_MODS", e.message) }
+    }
+
+    @ReactMethod fun amIMod(promise: Promise) {
+        try { promise.resolve((callBridgeString("amIMod") as? Boolean) ?: false) }
+        catch (e: Exception) { promise.reject("ERR_AM_I_MOD", e.message) }
+    }
+
+    @ReactMethod fun sendTextMessage(content: String, promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("sendTextMessage", content)?.toString() ?: "{\"status\":\"error:not_built\"}") }
+            catch (e: Exception) { promise.reject("ERR_SEND_TEXT", e.message) }
+        }.start()
+    }
+
+    @ReactMethod fun fetchMessages(promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("fetchMessages")?.toString() ?: "[]") }
+            catch (e: Exception) { promise.reject("ERR_FETCH", e.message) }
+        }.start()
+    }
+
+    @ReactMethod fun deleteMessage(msgCertJSON: String, promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("deleteMessage", msgCertJSON)?.toString() ?: "error:not_built") }
+            catch (e: Exception) { promise.reject("ERR_DELETE", e.message) }
+        }.start()
+    }
+
+    @ReactMethod fun generateAlias(key: String, promise: Promise) {
+        try { promise.resolve(callBridgeString("generateAlias", key)?.toString() ?: key.take(8)) }
+        catch (e: Exception) { promise.reject("ERR_ALIAS", e.message) }
+    }
+
+    @ReactMethod fun generateAvatar(key: String, promise: Promise) {
+        try { promise.resolve(callBridgeString("generateAvatar", key)?.toString() ?: "") }
+        catch (e: Exception) { promise.reject("ERR_AVATAR", e.message) }
+    }
+}

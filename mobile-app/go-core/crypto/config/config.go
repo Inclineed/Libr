@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,8 +42,7 @@ func init() {
 		// ~/.config/libr/keys/
 		home, err := os.UserHomeDir()
 		if err != nil {
-
-			panic("unable to get user home directory: " + err.Error())
+			log.Printf("unable to get user home directory: " + err.Error())
 		}
 		PrivateKeyPath = filepath.Join(home, ".config", "libr", "keys", "priv.key")
 		PublicKeyPath = filepath.Join(home, ".config", "libr", "keys", "pub.key")
