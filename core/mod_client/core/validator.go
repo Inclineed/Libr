@@ -8,7 +8,7 @@ import (
 )
 
 func IsValidMessage(content string) bool {
-	if len(content) == 0 || len(content) > 500 {
+	if len(content) == 0 || len(content) > 2000000 {
 		return false
 	}
 	if strings.ContainsAny(content, "<>{}") {

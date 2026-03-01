@@ -95,7 +95,8 @@ func ensureModConfigExists() {
 	path := GetModConfigPath()
 	defaultJSON := `{
   "forbidden": [],
-  "thresholds": "Toxic:0.30,Insult:0.90,Profanity:0.60,Derogatory:0.60,Sexual:0.30,Violence:0.40,Drugs:0.60,Death/Harm/Tragedy:0.60,Firearms/Weapons:0.60,Public Safety:0.30,Health:0.50,Religion/Belief:0.30,War/Conflict:0.70,Politics:0.80,Finance:0.40,Legal:0.60"
+  "thresholds": "Toxic:0.30,Insult:0.90,Profanity:0.60,Derogatory:0.60,Sexual:0.30,Violence:0.40,Drugs:0.60,Death/Harm/Tragedy:0.60,Firearms/Weapons:0.60,Public Safety:0.30,Health:0.50,Religion/Belief:0.30,War/Conflict:0.70,Politics:0.80,Finance:0.40,Legal:0.60",
+  "image_auto_mod": true
 }`
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -141,6 +142,27 @@ func LoadForbiddenWords() []string {
 
 var urlRegex = regexp.MustCompile(`(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)[^\s]+)`)
 
+var base64ImgRegex = regexp.MustCompile(`(?i)<img[^>]+src=["'](data:image/[a-zA-Z]*;base64,[^"']+)["'][^>]*>`)
+
+func extractBase64Images(content string) (string, []string) {
+	var images []string
+
+	// Find all base64 data URIs
+	matches := base64ImgRegex.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			// Extract just the base64 payload part if needed,
+			// though Cloud Vision accepts the raw base64 string without data:image prefix sometimes.
+			// We will strip the prefix for Cloud Vision later.
+			images = append(images, match[1])
+		}
+	}
+
+	// Remove the entire img tags from the content
+	cleanedContent := base64ImgRegex.ReplaceAllString(content, "[IMAGE_REMOVED]")
+	return cleanedContent, images
+}
+
 func AutoModerateMsg(msg models.UserMsg) (string, error) {
 	for _, word := range forbidden {
 		if strings.Contains(
@@ -155,7 +177,36 @@ func AutoModerateMsg(msg models.UserMsg) (string, error) {
 		return "0", nil
 	}
 
-	clean, err := AnalyzeWithGoogleNLP(msg.Content)
+	cleanedContent, images := extractBase64Images(msg.Content)
+	fmt.Printf("[DEBUG] Extracted %d images from message\n", len(images))
+
+	if len(images) > 0 {
+		config, err := ReadModConfigFile()
+		if err != nil {
+			fmt.Println("Error reading mod config for image automod check:", err)
+		} else {
+			// Check if ImageAutoMod is enabled (defaults to true if nil)
+			if config.ImageAutoMod != nil && !*config.ImageAutoMod {
+				fmt.Println("[INFO] ImageAutoMod disabled. Rejecting image.")
+				return "0", nil
+			}
+
+			// If ImageAutoMod is true/enabled, moderate images
+			for _, imgData := range images {
+				isSafe, err := AnalyzeImageWithGoogleVision(imgData)
+				if err != nil {
+					fmt.Printf("[WARN] Google Vision API error: %v — rejecting image safely\n", err)
+					return "0", nil
+				}
+				if !isSafe {
+					fmt.Println("[INFO] Image rejected by Google Vision API")
+					return "0", nil
+				}
+			}
+		}
+	}
+
+	clean, err := AnalyzeWithGoogleNLP(cleanedContent)
 	if err != nil {
 		// Google NLP unavailable (e.g. missing API key); fall back to allow
 		fmt.Printf("[WARN] Google NLP unavailable: %v — defaulting to allow\n", err)
@@ -165,6 +216,94 @@ func AutoModerateMsg(msg models.UserMsg) (string, error) {
 		return "1", nil
 	}
 	return "0", nil
+}
+
+func AnalyzeImageWithGoogleVision(base64Uri string) (bool, error) {
+	apiKey, err := GetGoogleApiKey()
+	if err != nil {
+		return false, err
+	}
+
+	if apiKey == "" {
+		logger.LogToFile("[DEBUG]Missing GOOGLE NLP API KEY for Vision")
+		return false, fmt.Errorf("missing GOOGLE_NLP_API_KEY in environment")
+	}
+
+	// Strip the "data:image/...;base64," prefix
+	parts := strings.SplitN(base64Uri, ",", 2)
+	base64Payload := base64Uri
+	if len(parts) == 2 {
+		base64Payload = parts[1]
+	}
+
+	payload := map[string]interface{}{
+		"requests": []map[string]interface{}{
+			{
+				"image": map[string]interface{}{
+					"content": base64Payload,
+				},
+				"features": []map[string]interface{}{
+					{
+						"type": "SAFE_SEARCH_DETECTION",
+					},
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return false, err
+	}
+
+	url := fmt.Sprintf("https://vision.googleapis.com/v1/images:annotate?key=%s", apiKey)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("Google Vision API error: %s", string(body))
+	}
+
+	var result struct {
+		Responses []struct {
+			SafeSearchAnnotation struct {
+				Adult    string `json:"adult"`
+				Spoof    string `json:"spoof"`
+				Medical  string `json:"medical"`
+				Violence string `json:"violence"`
+				Racy     string `json:"racy"`
+			} `json:"safeSearchAnnotation"`
+		} `json:"responses"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return false, err
+	}
+
+	if len(result.Responses) == 0 {
+		return true, nil // No annotation found, default allow
+	}
+
+	annotation := result.Responses[0].SafeSearchAnnotation
+
+	// Check for LIKELY or VERY_LIKELY flags
+	unsafeFlags := []string{"LIKELY", "VERY_LIKELY"}
+	for _, flag := range unsafeFlags {
+		if annotation.Adult == flag || annotation.Violence == flag || annotation.Racy == flag {
+			fmt.Printf("Blocked image. Adult: %s, Violence: %s, Racy: %s\n", annotation.Adult, annotation.Violence, annotation.Racy)
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 func ManModerateMsg(cert types.MsgCert) (*models.ModResponse, error) {

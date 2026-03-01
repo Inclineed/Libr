@@ -1,12 +1,16 @@
 import React from 'react';
 import { BrowserOpenURL } from '../../../wailsjs/runtime';
-import { PencilLine,Globe, Database, Copyright } from 'lucide-react';
+import { PencilLine, Globe, Database, Copyright } from 'lucide-react';
 import { logger } from '../../logger/logger';
+import { EventsOn } from "../../../wailsjs/runtime";
+import { toast } from "sonner";
 import {
   GetOnlineMods,
   GenerateAlias,
-  GenerateAvatar
+  GenerateAvatar,
+  GetPendingModerationStats
 } from "../../../wailsjs/go/main/App";
+import { useAppStore, PendingModeration } from '../../store/useAppStore';
 
 type ModDisplay = {
   key: string;
@@ -40,6 +44,37 @@ const ComingSoonDialog: React.FC<{ open: boolean; onClose: () => void }> = ({ op
 export const Menubar: React.FC = () => {
   const [mods, setMods] = React.useState<ModDisplay[]>([]);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const { pendingQueue, setPendingQueue } = useAppStore();
+
+  React.useEffect(() => {
+    // Seed from Go on every mount so the queue is current after a tab switch
+    GetPendingModerationStats().then((stats) => {
+      if (!stats?.items) return;
+      const queue: PendingModeration[] = stats.items.map((item: any) => ({
+        id: item.msg_sign,
+        ts: 0,
+        reason: item.is_image ? 'Image attached' : 'Message',
+        totalMods: item.approved + item.rejected + item.awaiting,
+        ackCount: item.approved,
+        awaitingMods: item.awaiting,
+      }));
+      setPendingQueue(queue);
+    }).catch(() => {});
+
+    // Live updates from cron
+    EventsOn("cron_status_update", (queue: PendingModeration[]) => {
+      setPendingQueue(queue || []);
+    });
+
+    // Toast notifications for finalized items
+    EventsOn("moderation_finalized", (event: { status: string; id: string }) => {
+      if (event.status === "approved") {
+        toast.success(`Message Approved (${event.id.substring(0, 8)}...)`);
+      } else {
+        toast.error(`Message Rejected (${event.id.substring(0, 8)}...)`);
+      }
+    });
+  }, []);
   React.useEffect(() => {
     logger.debug('[Menubar] Component mounted.');
     async function fetchMods() {
@@ -71,7 +106,8 @@ export const Menubar: React.FC = () => {
     <div className="w-full p-2 bg-card shadow-md items-center rounded-3xl h-full flex flex-col z-50">
       <ComingSoonDialog open={dialogOpen} onClose={() => {
         logger.info('[ComingSoonDialog] Closed.');
-        setDialogOpen(false)}} />
+        setDialogOpen(false)
+      }} />
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto flex flex-col w-full items-center">
         <div className="text-left w-full mt-4 mb-4 pl-2 flex items-center">
@@ -100,14 +136,51 @@ export const Menubar: React.FC = () => {
             </div>
           ))}
         </div>
+
+        {/* Pending Moderation Queue */}
+        <div className="text-left w-full mt-4 mb-2 pl-2 flex items-center">
+          <h3 className="text-sm font-semibold text-muted-foreground flex items-center justify-between w-[90%]">
+            <span>Moderation Queue</span>
+            {pendingQueue.length > 0 && (
+              <span className="bg-libr-accent1 text-white text-xs px-2 py-0.5 rounded-full">
+                {pendingQueue.length}
+              </span>
+            )}
+          </h3>
+        </div>
+
+        <div className="flex flex-col gap-2 w-full pl-2 pr-2 pb-4">
+          {pendingQueue.length === 0 ? (
+            <p className="text-xs text-muted-foreground pl-1">No items pending.</p>
+          ) : (
+            pendingQueue.map((item) => (
+              <div key={item.id} className="bg-muted/30 rounded-lg p-3 text-xs flex flex-col gap-1 border border-border/50">
+                <div className="flex justify-between items-start">
+                  <span className="font-semibold text-libr-accent1 w-[80%] break-words">
+                    {item.reason || "Manual Report"}
+                  </span>
+                  <span className="text-muted-foreground opacity-70">
+                    {new Date(item.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center mt-1 pt-1 border-t border-border/30">
+                  <span className="text-muted-foreground">Waiting on:</span>
+                  <span className="font-mono bg-background px-1.5 py-0.5 rounded border border-border/50">
+                    {item.awaitingMods} / {item.totalMods} mods
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
-      
+
       <div className="rounded-3xl m-2 bg-card w-[92%]">
         <button
           onClick={() => {
             logger.info('[Menubar] Feedback button clicked.');
             BrowserOpenURL("https://libr-ashen.vercel.app/eula");
-          
+
           }}
           className='flex justify-start hover:bg-muted/50 libr-button w-[100%] items-center space-x-2'
         >
@@ -120,7 +193,7 @@ export const Menubar: React.FC = () => {
           onClick={() => {
             logger.info('[Menubar] Feedback button clicked.');
             BrowserOpenURL("https://forms.gle/Uchqc6Z49aoJwjvZ9");
-          
+
           }}
           className='flex justify-start hover:bg-muted/50 libr-button w-[100%] items-center space-x-2'
         >
@@ -132,7 +205,8 @@ export const Menubar: React.FC = () => {
         <button
           onClick={() => {
             logger.info('[Menubar] Website link clicked.');
-            BrowserOpenURL("https://libr-ashen.vercel.app/")}}
+            BrowserOpenURL("https://libr-ashen.vercel.app/")
+          }}
           className="flex justify-start hover:bg-muted/50 libr-button w-[100%] items-center space-x-2"
         >
           <Globe className="aspect-square h-[40%]" />
@@ -143,7 +217,8 @@ export const Menubar: React.FC = () => {
         <button
           onClick={() => {
             logger.info('[Menubar] Open host database dialog.');
-            setDialogOpen(true)}}
+            setDialogOpen(true)
+          }}
           className="flex justify-start libr-button hover:bg-muted/50 w-[100%] items-center space-x-2"
         >
           <Database className="aspect-square h-[40%]" />

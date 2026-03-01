@@ -42,12 +42,20 @@ export function GetOnlineMods() {
   return window['go']['main']['App']['GetOnlineMods']();
 }
 
+export function GetPendingModerationStats() {
+  return window['go']['main']['App']['GetPendingModerationStats']();
+}
+
 export function GetRelayAddr() {
   return window['go']['main']['App']['GetRelayAddr']();
 }
 
 export function GetRelayStatus() {
   return window['go']['main']['App']['GetRelayStatus']();
+}
+
+export function IsModerationCronRunning() {
+  return window['go']['main']['App']['IsModerationCronRunning']();
 }
 
 export function LogToFile(arg1) {
@@ -60,6 +68,10 @@ export function ManualModerate(arg1, arg2) {
 
 export function ModAuthentication(arg1) {
   return window['go']['main']['App']['ModAuthentication'](arg1);
+}
+
+export function ModerateBySign(arg1, arg2) {
+  return window['go']['main']['App']['ModerateBySign'](arg1, arg2);
 }
 
 export function RegenKeys() {
@@ -76,6 +88,10 @@ export function SaveGoogleApiKey(arg1) {
 
 export function SaveModConfig(arg1) {
   return window['go']['main']['App']['SaveModConfig'](arg1);
+}
+
+export function SendImageInput(arg1) {
+  return window['go']['main']['App']['SendImageInput'](arg1);
 }
 
 export function SendInput(arg1) {

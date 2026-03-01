@@ -67,7 +67,8 @@ func createTables() error {
 		reason TEXT,
 		moderated INTEGER,
 		modsign TEXT,
-		ts INTEGER DEFAULT 0
+		ts INTEGER DEFAULT 0,
+		type TEXT
 	);
 	CREATE INDEX IF NOT EXISTS indx_sign ON msgresult(sign);`
 
@@ -79,6 +80,7 @@ func createTables() error {
 	// Safe migration: add ts column to existing databases that predate the schema change.
 	// SQLite returns an error if the column already exists; we ignore it.
 	_, _ = DB.Exec(`ALTER TABLE msgresult ADD COLUMN ts INTEGER DEFAULT 0;`)
+	_, _ = DB.Exec(`ALTER TABLE msgresult ADD COLUMN type TEXT;`)
 
 	return nil
 }

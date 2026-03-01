@@ -15,12 +15,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	//"io"
-
 	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
+	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -36,6 +35,7 @@ import (
 
 	//webtransport "github.com/libp2p/go-libp2p/p2p/transport/webtransport"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
+	"github.com/libr-forum/Libr/core/db/internal/keycache"
 )
 
 const ChatProtocol = protocol.ID("/chat/1.0.0")
@@ -84,8 +84,17 @@ func NewChatPeer(relayMultiAddrList []string) (*ChatPeer, error) {
 		// Other TLS configurations like ClientAuth, InsecureSkipVerify, etc.
 	}
 
+	// Derive a stable libp2p identity from the node's existing Ed25519 private key.
+	// This ensures the Peer ID is constant across restarts.
+	libp2pPrivKey, err := libp2pcrypto.UnmarshalEd25519PrivateKey(keycache.PrivKey)
+	if err != nil {
+		fmt.Println("[DEBUG] Failed to convert ed25519 key to libp2p key:", err)
+		return nil, err
+	}
+
 	fmt.Println("[DEBUG] Creating libp2p Host")
 	h, err := libp2p.New(
+		libp2p.Identity(libp2pPrivKey),                    // ← stable Peer ID derived from persisted key
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0/ws"), // WebSocket
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionManager(connMgr),
@@ -93,8 +102,6 @@ func NewChatPeer(relayMultiAddrList []string) (*ChatPeer, error) {
 		libp2p.EnableRelay(),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Transport(websocket.New, websocket.WithTLSConfig(tlsConfig)),
-		// libp2p.Transport(websocket.NewWithTLSConfig(tlsConfig)),
-		// libp2p.Transport(websocket.New),
 	)
 
 	if err != nil {
@@ -326,22 +333,28 @@ func (cp *ChatPeer) handleChatStream(s network.Stream) {
 		if reqData["Method"] == "GET" {
 			resp := ServeGetReq(reqStruct.ReqParams)
 			resp = bytes.TrimRight(resp, "\x00")
-			fmt.Println("[DEBUG]Resp bytes:", resp)
+			fmt.Println("[DEBUG]Resp bytes len:", len(resp))
 			_, err = s.Write(resp)
 			if err != nil {
 				fmt.Println("[DEBUG]Error writing resp bytes to relay")
 				return
 			}
+			// Signal EOF so the relay's io.ReadAll unblocks after reading the response
+			s.CloseWrite()
+			return
 		}
 
 		if reqData["Method"] == "POST" {
-			resp := ServePostReq(reqStruct.PeerID, reqStruct.ReqParams, reqStruct.Body) // have to set the new logic in serve post req now
+			resp := ServePostReq(reqStruct.PeerID, reqStruct.ReqParams, reqStruct.Body)
 			resp = bytes.TrimRight(resp, "\x00")
 			_, err = s.Write(resp)
 			if err != nil {
 				fmt.Println("[DEBUG]Error writing resp bytes to relay")
 				return
 			}
+			// Signal EOF so the relay's io.ReadAll unblocks after reading the response
+			s.CloseWrite()
+			return
 		}
 
 	}
@@ -370,24 +383,22 @@ func (cp *ChatPeer) Send(ctx context.Context, targetPeerID string, jsonReq []byt
 	}
 
 	stream.Write([]byte(jsonReqRelay))
+	// Signal we've finished writing so the relay's reader sees EOF
+	stream.CloseWrite()
 
-	fmt.Println("[DEBUG]Msg req sent to relay, waiting for ack")
+	// Use json.NewDecoder so it reads exactly one JSON object
+	// and doesn't wait for EOF which hangs the stream.
+	var rawMsg json.RawMessage
+	err = json.NewDecoder(stream).Decode(&rawMsg)
+	if err != nil {
+		fmt.Println("[DEBUG] Error reading JSON response from relay:", err)
+		defer stream.Close()
+		return nil, err
+	}
 
-	reader := bufio.NewReader(stream)
-	// ack, err := reader.ReadString('\n')
-
-	// if err != nil {
-	// 	fmt.Println("[DEBUG]Error getting the acknowledgement")
-	// 	return nil, err
-	// }
-	// _ = ack //can be used if required
-
-	var resp = make([]byte, 1024*50)
-	reader.Read(resp)
-	resp = bytes.TrimRight(resp, "\x00")
 	defer stream.Close()
 
-	return resp, err
+	return []byte(rawMsg), nil
 }
 
 func (cp *ChatPeer) GetConnectedPeers() []peer.ID {

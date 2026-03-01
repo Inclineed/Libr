@@ -19,6 +19,7 @@ type MsgCert struct {
 	ModCerts  []ModCert `json:"mod_certs"`
 	Sign      string    `json:"sign"`
 	Reason    string    `json:"reason,omitempty"`
+	Type      string    `json:"type,omitempty"`
 }
 
 type DataToSign struct {

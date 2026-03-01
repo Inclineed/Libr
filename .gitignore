@@ -234,3 +234,5 @@ out/
 # Documentation builds
 site/
 core/db/.env
+
+mobile-app/

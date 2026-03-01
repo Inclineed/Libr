@@ -38,6 +38,7 @@ export interface ReportedMessage {
   communityId: string;
   sign:string;
   note:string;
+  type?: string;
 }
 
 export interface ModLogEntry {
@@ -46,6 +47,14 @@ export interface ModLogEntry {
   status: string;
 }
 
+export interface PendingModeration {
+  id: string;
+  ts: number;
+  reason: string;
+  totalMods: number;
+  ackCount: number;
+  awaitingMods: number;
+}
 
 interface AppState {
   // User state
@@ -62,7 +71,10 @@ interface AppState {
   // Messages state
   messages: Message[];
   isLoading: boolean;
-  
+
+  // Pending moderation queue (persists across tab switches)
+  pendingQueue: PendingModeration[];
+
   // Actions
   setUser: (user: User) => void;
   logout: () => void;
@@ -73,6 +85,7 @@ interface AppState {
   addMessage: (message: Message) => void;
   setLoading: (loading: boolean) => void;
   joinCommunity: (communityId: string) => void;
+  setPendingQueue: (queue: PendingModeration[]) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -86,6 +99,7 @@ export const useAppStore = create<AppState>()(
       currentCommunity: null,
       messages: [],
       isLoading: false,
+      pendingQueue: [],
 
       // Actions
       setUser: (user) => set({ user, isAuthenticated: true }),
@@ -124,6 +138,8 @@ export const useAppStore = create<AppState>()(
           c.id === communityId ? { ...c, isJoined: true } : c
         )
       })),
+
+      setPendingQueue: (queue) => set({ pendingQueue: queue }),
     }),
     {
       name: 'libr-storage',

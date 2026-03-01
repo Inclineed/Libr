@@ -290,55 +290,52 @@ func (cp *ChatPeer) handleChatStream(s network.Stream) {
 	defer s.Close()
 
 	reader := bufio.NewReader(s)
-	for {
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		fmt.Println("[DEBUG]Error reading the bytes from the stream:", err)
+		return
+	}
+	line = bytes.TrimRight(line, "\n")
+	line = bytes.TrimRight(line, "\x00")
 
-		line, err := reader.ReadBytes('\n')
+	fmt.Println("[DEBUG] Raw input:", string(line))
+
+	var reqStruct reqFormat
+	err = json.Unmarshal(line, &reqStruct)
+	if err != nil {
+		fmt.Println("[DEBUG]Error unmarshalling to reqStruc:", err)
+		return
+	}
+
+	var reqData map[string]interface{}
+	reqStruct.ReqParams = bytes.TrimRight(reqStruct.ReqParams, "\x00")
+
+	if err := json.Unmarshal(reqStruct.ReqParams, &reqData); err != nil {
+		fmt.Printf("[ERROR] Failed to unmarshal incoming request: %v\n", err)
+		return
+	}
+
+	fmt.Printf("[DEBUG]ReqData is : %+v \n", reqData)
+
+	if reqData["Method"] == "GET" {
+		resp := ServeGetReq(reqStruct.ReqParams)
+		resp = bytes.TrimRight(resp, "\x00")
+		_, err = s.Write(resp)
 		if err != nil {
-			fmt.Println("[DEBUG]Error reading the bytes from the stream:", err)
+			fmt.Println("[DEBUG]Error writing resp bytes to relay")
 			return
 		}
-		line = bytes.TrimRight(line, "\n")
-		line = bytes.TrimRight(line, "\x00")
+	}
 
-		fmt.Println("[DEBUG] Raw input:", string(line))
-
-		var reqStruct reqFormat
-		err = json.Unmarshal(line, &reqStruct)
+	if reqData["Method"] == "POST" {
+		resp := ServePostReq(reqStruct.PeerID, reqStruct.ReqParams, reqStruct.Body) // have to set the new logic in serve post req now
+		resp = bytes.TrimRight(resp, "\x00")
+		fmt.Println("Response from ServePostReq:", string(resp))
+		_, err = s.Write(resp)
 		if err != nil {
-			fmt.Println("[DEBUG]Error unmarshalling to reqStruc:", err)
+			fmt.Println("[DEBUG]Error writing resp bytes to relay")
 			return
 		}
-
-		var reqData map[string]interface{}
-		reqStruct.ReqParams = bytes.TrimRight(reqStruct.ReqParams, "\x00")
-
-		if err := json.Unmarshal(reqStruct.ReqParams, &reqData); err != nil {
-			fmt.Printf("[ERROR] Failed to unmarshal incoming request: %v\n", err)
-			return
-		}
-
-		fmt.Printf("[DEBUG]ReqData is : %+v \n", reqData)
-
-		if reqData["Method"] == "GET" {
-			resp := ServeGetReq(reqStruct.ReqParams)
-			resp = bytes.TrimRight(resp, "\x00")
-			_, err = s.Write(resp)
-			if err != nil {
-				fmt.Println("[DEBUG]Error writing resp bytes to relay")
-				return
-			}
-		}
-
-		if reqData["Method"] == "POST" {
-			resp := ServePostReq(reqStruct.PeerID, reqStruct.ReqParams, reqStruct.Body) // have to set the new logic in serve post req now
-			resp = bytes.TrimRight(resp, "\x00")
-			_, err = s.Write(resp)
-			if err != nil {
-				fmt.Println("[DEBUG]Error writing resp bytes to relay")
-				return
-			}
-		}
-
 	}
 }
 
@@ -368,21 +365,25 @@ func (cp *ChatPeer) Send(ctx context.Context, targetPeerID string, jsonReq []byt
 
 	fmt.Println("[DEBUG]Msg req sent to relay, waiting for ack")
 
-	reader := bufio.NewReader(stream)
-	// ack, err := reader.ReadString('\n')
+	// Signal that we've finished writing the request
+	// (lets the relay/mod detect EOF on their reader)
+	stream.CloseWrite()
 
-	// if err != nil {
-	// 	fmt.Println("[DEBUG]Error getting the acknowledgement")
-	// 	return nil, err
-	// }
-	// _ = ack //can be used if required
+	fmt.Println("[DEBUG]Msg req sent to relay, waiting for ack")
 
-	var resp = make([]byte, 1024*50)
-	reader.Read(resp)
-	resp = bytes.TrimRight(resp, "\x00")
+	// Use json.NewDecoder so it reads exactly one JSON object
+	// and doesn't wait for EOF which hangs the stream.
+	var rawMsg json.RawMessage
+	err = json.NewDecoder(stream).Decode(&rawMsg)
+	if err != nil {
+		fmt.Println("[DEBUG] Error reading JSON response from relay:", err)
+		defer stream.Close()
+		return nil, err
+	}
+
 	defer stream.Close()
 
-	return resp, err
+	return []byte(rawMsg), nil
 }
 
 func (cp *ChatPeer) GetConnectedPeers() []peer.ID {

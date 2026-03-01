@@ -48,6 +48,17 @@ func NewApp() *App {
 	return &App{relayStatus: "offline", isMod: amImod}
 }
 
+// SetContext passes the Wails context from main to core for event emission
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	core.WailsCtx = ctx
+	logger.LogToFile("App started")
+	runtime.WindowMaximise(ctx)
+	go func() {
+		runtime.EventsEmit(ctx, "navigate-to-root")
+	}()
+}
+
 func (a *App) FetchPubKey() string {
 	pubStr := keycache.LoadPubKey()
 	return pubStr
@@ -124,14 +135,6 @@ func (a *App) GenerateAlias(key string) string {
 	return genAlias
 }
 
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
-	runtime.WindowMaximise(ctx)
-	go func() {
-		runtime.EventsEmit(ctx, "navigate-to-root")
-	}()
-}
-
 func (a *App) RegenKeys() string {
 	pub, _, _ := cryptoutils.GenerateKeyPair()
 	keycache.InitKeys()
@@ -140,8 +143,8 @@ func (a *App) RegenKeys() string {
 
 func (a *App) Connect(relayAdds []string) error {
 	if len(relayAdds) == 0 {
-        return fmt.Errorf("No relay addresses provided")
-    }
+		return fmt.Errorf("No relay addresses provided")
+	}
 	err := Peers.StartNode(relayAdds)
 	if err != nil {
 		a.relayStatus = "offline"
@@ -235,6 +238,81 @@ func (a *App) SendInput(input string) (types.SendResult, error) {
 	}, nil
 }
 
+func (a *App) SendImageInput(input string) types.SendResult {
+	if a.relayStatus != "online" {
+		return types.SendResult{Status: "offline"}
+	}
+
+	ts := time.Now().Unix()
+
+	// 1. Create a raw MsgCert with empty ModCerts list and our own pubkey
+	msgCert := types.MsgCert{
+		PublicKey: base64.StdEncoding.EncodeToString(keycache.PubKey),
+		Msg: types.Msg{
+			Content: input,
+			Ts:      ts,
+		},
+		Reason: "Image attached",
+		Type:   "manual_mod",
+	}
+
+	// Calculate its signature right away so manual mod queue tracks it cleanly
+	dataToSign := types.DataToSign{
+		Content:   input,
+		Timestamp: ts,
+		ModCerts:  []types.ModCert{},
+	}
+	jsonBytes, _ := json.Marshal(dataToSign)
+	_, sign, err := cryptoutils.SignMessage(keycache.PrivKey, string(jsonBytes))
+	if err != nil {
+		return types.SendResult{Status: "error"}
+	}
+	msgCert.Sign = sign
+
+	// 2. Look up mods
+	mods, err := util.GetOnlineMods()
+	if err != nil || len(mods) == 0 {
+		return types.SendResult{Status: "No online moderators available"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	modChan := make(chan []types.ModCert, 1)
+	go func() {
+		modcerts := core.ManualSendToMods(msgCert, mods, "Image attached", true)
+		modChan <- modcerts
+	}()
+
+	var modcertlist []types.ModCert
+	select {
+	case modcertlist = <-modChan:
+	case <-ctx.Done():
+		return types.SendResult{Status: "timeout"}
+	}
+
+	if modcertlist == nil {
+		return types.SendResult{Status: "No moderators available"}
+	}
+
+	// modcertlist empty means it successfully lodged into pending queue but no immediate signatures
+	if len(modcertlist) == 0 {
+		return types.SendResult{
+			Status: "pending_manual",
+			Sign:   msgCert.Sign,
+			Ts:     msgCert.Msg.Ts,
+		}
+	}
+
+	// If by some miracle they all rejected it synchronously:
+	return types.SendResult{
+		Status:   "sent",
+		ModCerts: modcertlist,
+		Sign:     msgCert.Sign,
+		Ts:       msgCert.Msg.Ts,
+	}
+}
+
 func (a *App) Report(msgcert types.MsgCert, reason *string) string {
 	if a.relayStatus != "online" {
 		return "Offline"
@@ -263,6 +341,7 @@ func (a *App) Report(msgcert types.MsgCert, reason *string) string {
 	if reason != nil {
 		reasonStr = *reason
 	}
+	msgcert.Type = "report"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
@@ -336,6 +415,88 @@ func (a *App) FetchMessageReports() []models.MsgCert {
 func (a *App) ManualModerate(cert types.MsgCert, moderated int) {
 	modsign, _ := moddb.ReportModSign(&cert, strconv.Itoa(moderated), keycache.PrivKey, keycache.PubKey)
 	moddb.UpdateModerationStatus(cert.Sign, modsign, moderated)
+}
+
+// IsModerationCronRunning exposes the cron status to the frontend via Wails.
+func (a *App) IsModerationCronRunning() bool {
+	return core.IsModerationCronRunning()
+}
+
+// ModerateBySign is a simpler Wails-callable that takes just the sign string,
+// avoiding any struct-mapping ambiguity across MsgCert type variants.
+func (a *App) ModerateBySign(sign string, moderated int) {
+	// Fetch full message record so we can choose the correct signing payload.
+	content, ts, msgType, err := moddb.GetMsgBySign(sign)
+	if err != nil {
+		log.Printf("[ModerateBySign] db lookup error: %v", err)
+	}
+	cert := types.MsgCert{
+		Sign: sign,
+		Type: msgType,
+		Msg: types.Msg{
+			Content: content,
+			Ts:      ts,
+		},
+	}
+	modsign, err := moddb.ReportModSign(&cert, strconv.Itoa(moderated), keycache.PrivKey, keycache.PubKey)
+	if err != nil {
+		log.Printf("[ModerateBySign] signing error: %v", err)
+	}
+	if _, err := moddb.UpdateModerationStatus(sign, modsign, moderated); err != nil {
+		log.Printf("[ModerateBySign] update error: %v", err)
+	} else {
+		log.Printf("[ModerateBySign] sign=%s moderated=%d updated OK", sign, moderated)
+	}
+}
+
+// PendingItemStat is returned by GetPendingModerationStats for each pending message.
+type PendingItemStat struct {
+	MsgSign  string `json:"msg_sign"`
+	Approved int    `json:"approved"`
+	Rejected int    `json:"rejected"`
+	Awaiting int    `json:"awaiting"`
+	IsImage  bool   `json:"is_image"`
+}
+
+// PendingModerationStats is the full response from GetPendingModerationStats.
+type PendingModerationStats struct {
+	Items      []PendingItemStat `json:"items"`
+	CronActive bool              `json:"cron_active"`
+}
+
+// GetPendingModerationStats returns vote tallies for all pending moderation files.
+func (a *App) GetPendingModerationStats() PendingModerationStats {
+	pattern := filepath.Join(cache.GetCacheDir(), "pending_mods", "*.json")
+	files, _ := filepath.Glob(pattern)
+
+	stats := PendingModerationStats{
+		Items:      []PendingItemStat{},
+		CronActive: core.IsModerationCronRunning(),
+	}
+
+	for _, f := range files {
+		pending, err := cache.LoadPendingModeration(f)
+		if err != nil {
+			continue
+		}
+		var approved, rejected int
+		for _, cert := range pending.PartialCerts {
+			switch cert.Status {
+			case "1":
+				approved++
+			case "0":
+				rejected++
+			}
+		}
+		stats.Items = append(stats.Items, PendingItemStat{
+			MsgSign:  pending.MsgSign,
+			Approved: approved,
+			Rejected: rejected,
+			Awaiting: len(pending.AwaitingMods),
+			IsImage:  pending.MsgCert.Reason == "Image attached",
+		})
+	}
+	return stats
 }
 
 func (a *App) GetModerationLogs() ([]models.ModLogEntry, error) {

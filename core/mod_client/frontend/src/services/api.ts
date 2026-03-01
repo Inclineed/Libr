@@ -1,8 +1,8 @@
-import { SendInput,FetchAll,GenerateAvatar,GenerateAlias,GetModerationLogs,GetModConfig,SaveModConfig,ModAuthentication,SaveGoogleApiKey,ManualModerate,FetchMessageReports } from "../../wailsjs/go/main/App"; 
+import { SendInput, SendImageInput, FetchAll, GenerateAvatar, GenerateAlias, GetModerationLogs, GetModConfig, SaveModConfig, ModAuthentication, SaveGoogleApiKey, ManualModerate, FetchMessageReports, ModerateBySign, IsModerationCronRunning, GetPendingModerationStats } from "../../wailsjs/go/main/App";
 import axios from 'axios';
-import { Community, Message, User, ModLogEntry, useAppStore,ReportedMessage } from '../store/useAppStore';
-import {types} from '../../wailsjs/go/models'
-import {emojify} from 'node-emoji';
+import { Community, Message, User, ModLogEntry, useAppStore, ReportedMessage } from '../store/useAppStore';
+import { types } from '../../wailsjs/go/models'
+import { emojify } from 'node-emoji';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
@@ -181,6 +181,7 @@ export const apiService = {
         sign: msg.sign,
         content: msg.msg.content,
         note: msg.reason || '',
+        type: msg.type,
         communityId: _communityId,
       }));
     } catch (err) {
@@ -193,14 +194,35 @@ export const apiService = {
     try {
       await ManualModerate(cert, moderated);
     } catch (err) {
-      console.error("Failed to fetch messages:", err);
+      console.error("manualModerate error:", err);
+      throw err;
     }
   },
 
+  async moderateBySign(sign: string, moderated: number): Promise<void> {
+    await ModerateBySign(sign, moderated);
+  },
+
+  async isModerationCronRunning(): Promise<boolean> {
+    return await IsModerationCronRunning();
+  },
+
+  async getPendingModerationStats(): Promise<{
+    items: { msg_sign: string; approved: number; rejected: number; awaiting: number; is_image: boolean }[];
+    cron_active: boolean;
+  }> {
+    return await GetPendingModerationStats();
+  },
+
   async sendMessage(communityId: string, content: string): Promise<Message> {
-    const result = await SendInput(content);
+    const isImage = /<img\s+[^>]*src="data:image/i.test(content);
+    const result = isImage ? await SendImageInput(content) : await SendInput(content);
 
     const approved = result.status === 'sent';
+    // For image messages: ANY non-rejected outcome should be treated as pending.
+    // This covers: 'pending_manual', 'timeout', 'No online moderators available', 'No moderators available'
+    // The pending_mods cron will track it and complete it once a mod comes online.
+    const isImagePending = isImage && result.status !== 'error' && result.status !== 'offline';
     const timeout = result.status === 'timeout';
     const modcerts: types.ModCert[] = result.mod_certs ?? [];
 
@@ -213,7 +235,7 @@ export const apiService = {
       authorAlias: user.alias,
       timestamp: BigInt(result.ts > 0 ? result.ts : Math.floor(Date.now() / 1000)),
       communityId,
-      status: approved ? 'approved' : timeout ? 'pending' : 'rejected',
+      status: approved ? 'approved' : (timeout || isImagePending) ? 'pending' : 'rejected',
       avatarSvg: user.avatarSvg,
       moderationNote: modcerts,
       sign: result.sign ?? '',
@@ -233,12 +255,12 @@ export const apiService = {
     console.log(`Message ${action}ed with note: ${note}`);
   },
 
-  async GetModConfig(): Promise<{ forbidden: string[]; thresholds: string }> {
+  async GetModConfig(): Promise<{ forbidden: string[]; thresholds: string; image_auto_mod?: boolean }> {
     return await GetModConfig();
   },
 
-  async SaveModConfig(data: { forbidden: string[]; thresholds: string }): Promise<void> {
-    await SaveModConfig(data)
+  async SaveModConfig(data: { forbidden: string[]; thresholds: string; image_auto_mod?: boolean }): Promise<void> {
+    await SaveModConfig(data as any)
   },
 
   async SaveGoogleApiKey(key: string) {
@@ -250,8 +272,8 @@ export function parseFormatting(text: string): string {
   // Escape HTML to prevent injection
   const escapeHTML = (str: string) =>
     str.replace(/&/g, '&amp;')
-       .replace(/</g, '&lt;')
-       .replace(/>/g, '&gt;');
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
 
   // Apply emoji replacements first
   let formatted = emojify(text);

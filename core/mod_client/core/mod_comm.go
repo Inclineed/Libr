@@ -81,20 +81,28 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 					mu.Unlock()
 					log.Printf("Mod %s acknowledged", mod.PeerId)
 					return
-				}
-
-				// Verify signature for non-acknowledgement
-				msgHash := cert.Sign + modcert.Status
-				if cryptoutils.VerifySignature(modcert.PublicKey, msgHash, modcert.Sign) {
-					log.Printf("Received valid modcert from %s", mod.PeerId)
-					mu.Lock()
-					modcertList = append(modcertList, modcert)
-					if modcert.Status != "1" {
-						rejCount++
-					}
-					mu.Unlock()
 				} else {
-					log.Printf("Invalid signature from mod %s", mod.PeerId)
+					// Verify signature for non-acknowledgement.
+					// manual_mod (image messages) are signed over content+ts+status,
+					// matching the auto-mod structure. All other manual types (e.g. report)
+					// use sign+status.
+					var msgHash string
+					if cert.Type == "manual_mod" {
+						msgHash = cert.Msg.Content + strconv.FormatInt(cert.Msg.Ts, 10) + modcert.Status
+					} else {
+						msgHash = cert.Sign + modcert.Status
+					}
+					if cryptoutils.VerifySignature(modcert.PublicKey, msgHash, modcert.Sign) {
+						log.Printf("Received valid modcert from %s", mod.PeerId)
+						mu.Lock()
+						modcertList = append(modcertList, modcert)
+						if modcert.Status != "1" {
+							rejCount++
+						}
+						mu.Unlock()
+					} else {
+						log.Printf("Invalid signature from mod %s", mod.PeerId)
+					}
 				}
 			}
 		}(mod)
@@ -120,11 +128,12 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 			CreatedAt:    time.Now(),
 		}
 
+		fmt.Printf("saving pending moderation")
 		if err := cache.SavePendingModeration(pending); err != nil {
 			log.Printf("❌ Failed to save pending moderation: %v", err)
-		} else if !CronRunning {
-			// Start cron only on first try
-			go StartModerationCron()
+		} else {
+			// StartModerationCron is idempotent — safe to call every time.
+			StartModerationCron()
 		}
 	}
 

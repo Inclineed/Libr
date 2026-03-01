@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
-import { Message,User,useAppStore } from '../../store/useAppStore';
-import { Clock, Check, AlertCircle, MoreVertical, Cross } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Message, User, useAppStore } from '../../store/useAppStore';
+import { Clock, Check, AlertCircle, MoreVertical, Cross, X, ImageIcon } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import {
   DropdownMenu,
@@ -9,10 +9,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {emojify} from 'node-emoji';
-import { Delete, Report,GenerateAlias } from 'wailsjs/go/main/App';
+import { emojify } from 'node-emoji';
+import { Delete, Report, GenerateAlias } from 'wailsjs/go/main/App';
 import { types } from 'wailsjs/go/models';
-import { parseFormatting,apiService } from '@/services/api';
+import { parseFormatting, apiService } from '@/services/api';
 import { Tooltip, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { TooltipContent } from '@radix-ui/react-tooltip';
 
@@ -34,8 +34,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
       day: '2-digit',
     }).format(date);
   };
-  
-  const{setMessages}=useAppStore();
+
+  const { setMessages } = useAppStore();
 
   const getStatus = () => {
     switch (message.status) {
@@ -61,11 +61,30 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   };
 
   const { title, body } = parseMessage(message.content);
-  const safeHtml = DOMPurify.sanitize(parseFormatting(body));
+
+  // Allow DOMPurify to pass through img tags with data: src for base64 images
+  const safeHtml = DOMPurify.sanitize(parseFormatting(body), {
+    ADD_TAGS: ['img'],
+    ADD_ATTR: ['src', 'alt', 'class', 'style'],
+    ALLOW_DATA_ATTR: true,
+    FORCE_BODY: true,
+  });
+
+  // Extract image srcs for separate, richer rendering
+  const imgSrcList: string[] = [];
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = safeHtml;
+  tempDiv.querySelectorAll('img').forEach(img => {
+    imgSrcList.push(img.src);
+    img.remove();
+  });
+  const safeTextHtml = tempDiv.innerHTML;
+
   const status = getStatus();
-  const user=useAppStore.getState().user;
+  const user = useAppStore.getState().user;
 
   const [showReportPopup, setShowReportPopup] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   return (
     <>
@@ -132,8 +151,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                           </TooltipProvider>
                           <p>
                             {cert.status === "1"
-                              ? <Check className="w-3 h-3 text-green-500"/>
-                              : <Cross className="w-3 h-3 text-red-500"/>}
+                              ? <Check className="w-3 h-3 text-green-500" />
+                              : <Cross className="w-3 h-3 text-red-500" />}
                           </p>
                           <TooltipProvider>
                             <Tooltip>
@@ -152,17 +171,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
                   {message.authorPublicKey === user.publicKey ? (
                     <DropdownMenuItem
-                      onClick={() =>{
-                        const msg:types.Msg={
-                          content:message.content,
-                          ts:Number(message.timestamp),
+                      onClick={() => {
+                        const msg: types.Msg = {
+                          content: message.content,
+                          ts: Number(message.timestamp),
                         }
-                        const msgcert=new types.MsgCert({
-                          public_key:message.authorPublicKey,
-                          msg:msg,
-                          mod_certs:message.moderationNote,
-                          sign:message.sign,
-                          
+                        const msgcert = new types.MsgCert({
+                          public_key: message.authorPublicKey,
+                          msg: msg,
+                          mod_certs: message.moderationNote,
+                          sign: message.sign,
+
                         });
                         Delete(msgcert);
                       }}
@@ -172,19 +191,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                     </DropdownMenuItem>
                   ) : (
                     <DropdownMenuItem
-                      onClick={() =>{
-                        const msg:types.Msg={
-                          content:message.content,
-                          ts:Number(message.timestamp),
+                      onClick={() => {
+                        const msg: types.Msg = {
+                          content: message.content,
+                          ts: Number(message.timestamp),
                         }
-                        const msgcert=new types.MsgCert({
-                          public_key:message.authorPublicKey,
-                          msg:msg,
-                          mod_certs:message.moderationNote,
-                          sign:message.sign,
-                          
+                        const msgcert = new types.MsgCert({
+                          public_key: message.authorPublicKey,
+                          msg: msg,
+                          mod_certs: message.moderationNote,
+                          sign: message.sign,
+
                         });
-                        Report(msgcert,"report reason");
+                        Report(msgcert, "report reason");
                         setShowReportPopup(true);
                         setTimeout(() => setShowReportPopup(false), 2500);
                       }}
@@ -227,8 +246,28 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
                 <div
                   className="text-sm leading-relaxed text-foreground mt-1 break-words max-w-[55vw] whitespace-pre-wrap message-bubble-content"
-                  dangerouslySetInnerHTML={{ __html: safeHtml }}
+                  dangerouslySetInnerHTML={{ __html: safeTextHtml }}
                 />
+
+                {/* Image gallery */}
+                {imgSrcList.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {imgSrcList.map((src, idx) => (
+                      <div key={idx} className="relative group cursor-pointer" onClick={() => setLightboxSrc(src)}>
+                        <img
+                          src={src}
+                          alt={`image-${idx + 1}`}
+                          className="max-h-48 max-w-xs rounded-2xl object-cover border border-border/40 shadow-md group-hover:opacity-90 transition-opacity"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="bg-black/50 rounded-full p-2">
+                            <ImageIcon className="w-4 h-4 text-white" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -258,6 +297,40 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           It will be acted upon soon.
         </div>
       )}
+
+      {/* Lightbox */}
+      <AnimatePresence>
+        {lightboxSrc && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            onClick={() => setLightboxSrc(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.85, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="relative max-w-[90vw] max-h-[90vh]"
+              onClick={e => e.stopPropagation()}
+            >
+              <img
+                src={lightboxSrc}
+                alt="Full size"
+                className="max-w-[90vw] max-h-[90vh] rounded-2xl shadow-2xl object-contain"
+              />
+              <button
+                onClick={() => setLightboxSrc(null)}
+                className="absolute -top-3 -right-3 bg-card border border-border rounded-full p-1 shadow-lg hover:bg-muted transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 };
