@@ -15,6 +15,17 @@ import { types } from 'wailsjs/go/models';
 import { parseFormatting, apiService } from '@/services/api';
 import { Tooltip, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { TooltipContent } from '@radix-ui/react-tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 
 interface MessageBubbleProps {
   message: Message;
@@ -85,6 +96,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
   const [showReportPopup, setShowReportPopup] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+
+  const handleReportSubmit = async () => {
+    const msg: types.Msg = {
+      content: message.content,
+      ts: Number(message.timestamp),
+    };
+    const msgcert = new types.MsgCert({
+      public_key: message.authorPublicKey,
+      msg: msg,
+      mod_certs: message.moderationNote,
+      sign: message.sign,
+    });
+
+    Report(msgcert, reportReason || "No reason provided");
+    setIsReportDialogOpen(false);
+    setReportReason("");
+    setShowReportPopup(true);
+    setTimeout(() => setShowReportPopup(false), 2500);
+  };
 
   return (
     <>
@@ -194,22 +226,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                     </DropdownMenuItem>
                   ) : (
                     <DropdownMenuItem
-                      onClick={() => {
-                        const msg: types.Msg = {
-                          content: message.content,
-                          ts: Number(message.timestamp),
-                        }
-                        const msgcert = new types.MsgCert({
-                          public_key: message.authorPublicKey,
-                          msg: msg,
-                          mod_certs: message.moderationNote,
-                          sign: message.sign,
-
-                        });
-                        Report(msgcert, "report reason");
-                        setShowReportPopup(true);
-                        setTimeout(() => setShowReportPopup(false), 2500);
-                      }}
+                      onClick={() => setIsReportDialogOpen(true)}
                       className="text-destructive cursor-pointer hover:bg-destructive/10"
                     >
                       Report
@@ -334,6 +351,33 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <Dialog open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Report Message</DialogTitle>
+            <DialogDescription>
+              Why are you reporting this message? This will be sent to moderators for review.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="reason">Reason</Label>
+              <Textarea
+                id="reason"
+                placeholder="Spam, harassment, hate speech, etc."
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                className="h-24"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsReportDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleReportSubmit}>Submit Report</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
