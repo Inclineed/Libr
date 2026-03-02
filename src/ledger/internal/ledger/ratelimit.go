@@ -9,11 +9,11 @@ import (
 
 // RateLimiter enforces a fixed-window per-IP request limit.
 type RateLimiter struct {
-	mu       sync.Mutex
-	windows  map[string]*windowEntry
-	limit    int           // max requests per window
-	window   time.Duration // window duration
-	cleanEvery int         // evict stale entries every N requests
+	mu         sync.Mutex
+	windows    map[string]*windowEntry
+	limit      int           // max requests per window
+	window     time.Duration // window duration
+	cleanEvery int           // evict stale entries every N requests
 	counter    int
 }
 

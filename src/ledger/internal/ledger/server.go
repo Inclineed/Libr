@@ -9,10 +9,10 @@ import (
 
 // Server is the HTTP server for the relay ledger.
 type Server struct {
-	store     RelayStore
-	mux       *http.ServeMux
-	cfg       ServerConfig
-	sigVal    SignatureValidator
+	store  RelayStore
+	mux    *http.ServeMux
+	cfg    ServerConfig
+	sigVal SignatureValidator
 }
 
 type errorResponse struct {
