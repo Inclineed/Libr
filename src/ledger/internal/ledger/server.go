@@ -7,9 +7,12 @@ import (
 	"net/http"
 )
 
+// Server is the HTTP server for the relay ledger.
 type Server struct {
-	store RelayStore
-	mux   *http.ServeMux
+	store     RelayStore
+	mux       *http.ServeMux
+	cfg       ServerConfig
+	sigVal    SignatureValidator
 }
 
 type errorResponse struct {
@@ -20,17 +23,28 @@ type successResponse struct {
 	Status string `json:"status"`
 }
 
+// NewServer creates a Server with default (empty) configuration.
 func NewServer(store RelayStore) *Server {
+	return NewServerWithConfig(store, ServerConfig{})
+}
+
+// NewServerWithConfig creates a Server with the provided configuration.
+func NewServerWithConfig(store RelayStore, cfg ServerConfig) *Server {
 	s := &Server{
 		store: store,
 		mux:   http.NewServeMux(),
+		cfg:   cfg,
 	}
-
 	s.routes()
 	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.RateLimiter != nil {
+		handler := s.cfg.RateLimiter.Middleware(s.mux)
+		handler.ServeHTTP(w, r)
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -76,6 +90,13 @@ func (s *Server) handleUpsertRelay(w http.ResponseWriter, r *http.Request) {
 	if req.WSAddress == "" {
 		writeError(w, http.StatusBadRequest, "ws_address must not be empty")
 		return
+	}
+
+	if s.cfg.ValidateSignatures {
+		if err := s.sigVal.Validate(req); err != nil {
+			writeError(w, http.StatusUnauthorized, "invalid signature: "+err.Error())
+			return
+		}
 	}
 
 	relay := RelayInfo{
