@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, FlatList, View, Text, Alert, RefreshControl, KeyboardAvoidingView, Platform, StatusBar, Modal, ScrollView, Animated } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { SvgXml } from 'react-native-svg';
 import { useRouter } from 'expo-router';
@@ -134,7 +135,21 @@ function MessageCard({ cert, myPublicKey, onLongPress }: { cert: RetMsgCert, myP
       onLongPress={() => onLongPress(cert)}
       activeOpacity={0.85}
     >
-      <View style={styles.card}>
+      <View style={[
+        styles.card,
+        cert.sign.startsWith('temp-') && { opacity: 0.7 },
+        { overflow: 'hidden' }
+      ]}>
+        {isMine && <View style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 4,
+          backgroundColor: C.teal,
+          borderTopLeftRadius: 16,
+          borderBottomLeftRadius: 16
+        }} />}
         <View style={styles.cardAvatar}>
           {avatarSvg ? (
             <Image source={getAvatarUri(avatarSvg)} style={styles.avatarImage} contentFit="cover" />
@@ -147,7 +162,7 @@ function MessageCard({ cert, myPublicKey, onLongPress }: { cert: RetMsgCert, myP
         <View style={styles.cardBody}>
           <View style={styles.cardMeta}>
             <Text style={[styles.aliasText, { color }]} numberOfLines={1}>{alias}</Text>
-            {isMine && <Text style={styles.mineTag}>you</Text>}
+            {isMine && <Text style={styles.mineTag}>{cert.sign.startsWith('temp-') ? 'Sending...' : 'you'}</Text>}
           </View>
           {title && <Text style={styles.titleText}>{title}</Text>}
           {plainContent.length > 0 && <Text style={styles.contentText}>{plainContent}</Text>}
@@ -355,7 +370,7 @@ function ReportReasonModal({
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage, addReportedSign } = useAppStore();
+  const { state, setPublicKey, setPeerId, setConnectionStatus, setModerator, setError, setMessages, setFetching, removeMessage, addReportedSign } = useAppStore();
   const { toggleSidebar, isOpen } = useSidebar();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -366,6 +381,7 @@ export default function ChatScreen() {
   const [reportMessageCert, setReportMessageCert] = useState<RetMsgCert | null>(null);
   const fetchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fabScale = useRef(new Animated.Value(1)).current;
+  const insets = useSafeAreaInsets();
 
   const log = useCallback((msg: string) => {
     const line = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
@@ -430,6 +446,10 @@ export default function ChatScreen() {
       setPeerId(id);
       setConnectionStatus('connected');
       log('Connected!');
+
+      // Check moderator
+      const mod = await LibrCore.amIMod();
+      setModerator(mod);
 
       // 5. Initial message fetch — delayed so state settles first
       setTimeout(() => doFetch(), 500);
@@ -613,11 +633,11 @@ export default function ChatScreen() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 10) }]}>
         <View style={styles.headerLeft}>
           <View style={styles.hamburgerWrap}>
             <AnimatedHamburger isOpen={isOpen} onPress={toggleSidebar} color={C.text} />
@@ -721,7 +741,7 @@ export default function ChatScreen() {
           <Text style={styles.fabText}>Create</Text>
         </TouchableOpacity>
       </Animated.View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -736,7 +756,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 56 : (StatusBar.currentHeight ?? 24) + 12,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: C.border,

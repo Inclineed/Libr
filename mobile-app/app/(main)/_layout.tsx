@@ -41,7 +41,7 @@ export default function SidebarLayout() {
           <Stack.Screen name="queue" />
           <Stack.Screen name="profile" />
         </Stack>
-        <Sidebar isOpen={isOpen} onClose={closeSidebar} />
+        <Sidebar isOpen={isOpen} onClose={closeSidebar} onOpen={openSidebar} />
       </View>
     </SidebarContext.Provider>
   );

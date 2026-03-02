@@ -22,6 +22,8 @@ interface AppState {
   isFetching: boolean;
   /** Set of message signatures reported by the current user. */
   reportedSigns: Set<string>;
+  /** Whether the current user is a moderator. */
+  isModerator: boolean;
 }
 
 type Action =
@@ -32,6 +34,8 @@ type Action =
   | { type: 'SET_MESSAGES'; payload: RetMsgCert[] }
   | { type: 'SET_FETCHING'; payload: boolean }
   | { type: 'REMOVE_MESSAGE'; payload: string }
+  | { type: 'ADD_MESSAGE'; payload: RetMsgCert }
+  | { type: 'SET_MODERATOR'; payload: boolean }
   | { type: 'ADD_REPORTED_SIGN'; payload: string }
   | { type: 'SET_REPORTED_SIGNS'; payload: Set<string> };
 
@@ -45,6 +49,7 @@ const initialState: AppState = {
   messages: [],
   isFetching: false,
   reportedSigns: new Set(),
+  isModerator: false,
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -53,15 +58,35 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_PEER_ID': return { ...state, peerId: action.payload };
     case 'SET_CONNECTION_STATUS': return { ...state, connectionStatus: action.payload };
     case 'SET_ERROR': return { ...state, lastError: action.payload };
-    case 'SET_MESSAGES': return { ...state, messages: action.payload };
+    case 'SET_MESSAGES': {
+      // Keep optimistic messages (temp-prefix) that haven't been "confirmed" yet
+      const optimistic = state.messages.filter(m => m.sign.startsWith('temp-'));
+      const incoming = action.payload;
+
+      // Rough matching to remove optimistic once real one arrives: match by content + sender
+      const remainingOptimistic = optimistic.filter(opt =>
+        !incoming.some(inc => inc.public_key === opt.public_key && inc.msg.content === opt.msg.content)
+      );
+
+      // Merge and sort by timestamp descending
+      const merged = [...remainingOptimistic, ...incoming].sort((a, b) => b.msg.ts - a.msg.ts);
+      return { ...state, messages: merged };
+    }
     case 'SET_FETCHING': return { ...state, isFetching: action.payload };
     case 'REMOVE_MESSAGE': return { ...state, messages: state.messages.filter(m => m.sign !== action.payload) };
+    case 'ADD_MESSAGE': {
+      if (state.messages.find(m => m.sign === action.payload.sign)) return state;
+      // Add to beginning and sort just in case
+      const newMessages = [action.payload, ...state.messages].sort((a, b) => b.msg.ts - a.msg.ts);
+      return { ...state, messages: newMessages };
+    }
     case 'ADD_REPORTED_SIGN': {
       const newSet = new Set(state.reportedSigns);
       newSet.add(action.payload);
       return { ...state, reportedSigns: newSet };
     }
     case 'SET_REPORTED_SIGNS': return { ...state, reportedSigns: action.payload };
+    case 'SET_MODERATOR': return { ...state, isModerator: action.payload };
     default: return state;
   }
 }
@@ -77,6 +102,8 @@ interface StoreContextValue {
   setMessages: (msgs: RetMsgCert[]) => void;
   setFetching: (v: boolean) => void;
   removeMessage: (sign: string) => void;
+  addMessage: (msg: RetMsgCert) => void;
+  setModerator: (isMod: boolean) => void;
   addReportedSign: (sign: string) => void;
 }
 
@@ -128,6 +155,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const setMessages = useCallback((m: RetMsgCert[]) => dispatch({ type: 'SET_MESSAGES', payload: m }), []);
   const setFetching = useCallback((v: boolean) => dispatch({ type: 'SET_FETCHING', payload: v }), []);
   const removeMessage = useCallback((sign: string) => dispatch({ type: 'REMOVE_MESSAGE', payload: sign }), []);
+  const addMessage = useCallback((msg: RetMsgCert) => dispatch({ type: 'ADD_MESSAGE', payload: msg }), []);
+  const setModerator = useCallback((isMod: boolean) => dispatch({ type: 'SET_MODERATOR', payload: isMod }), []);
   const addReportedSign = useCallback((sign: string) => {
     dispatch({ type: 'ADD_REPORTED_SIGN', payload: sign });
     // Persist to AsyncStorage
@@ -141,7 +170,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <StoreContext.Provider value={{ state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage, addReportedSign }}>
+    <StoreContext.Provider value={{ state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage, addMessage, setModerator, addReportedSign }}>
       {children}
     </StoreContext.Provider>
   );

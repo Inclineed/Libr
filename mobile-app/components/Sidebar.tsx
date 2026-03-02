@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions, PanResponder } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { SvgXml } from 'react-native-svg';
 import { Colors } from '@/constants/theme';
@@ -30,11 +31,21 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
+  const insets = useSafeAreaInsets();
   const { state } = useAppStore();
   const router = useRouter();
 
+  // SIDEBAR_WIDTH is the width of the panel
   // Animation value for sliding
-  const [slideAnim] = useState(new Animated.Value(-SIDEBAR_WIDTH));
+  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
+  const lastAnimatedValue = useRef(-SIDEBAR_WIDTH);
+
+  useEffect(() => {
+    slideAnim.addListener(({ value }) => {
+      lastAnimatedValue.current = value;
+    });
+    return () => slideAnim.removeAllListeners();
+  }, []);
 
   // Determine moderator status
   const [isModerator, setIsModerator] = useState(false);
@@ -68,7 +79,47 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     }).start();
   }, [isOpen]);
 
-  if (!isOpen && slideAnim.addListener === undefined) return null; // Avoid rendering when closed to save memory, though Animated might need it mounted. Let's keep it mounted but translated away.
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only set responder if swipe is horizontal and significant
+        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 2;
+        const isClosingSwipe = isOpen && gestureState.dx < -10;
+        return isHorizontalSwipe && isClosingSwipe;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        let newValue = (isOpen ? 0 : -SIDEBAR_WIDTH) + gestureState.dx;
+        // Clamp value
+        if (newValue > 0) newValue = 0;
+        if (newValue < -SIDEBAR_WIDTH) newValue = -SIDEBAR_WIDTH;
+        slideAnim.setValue(newValue);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const threshold = SIDEBAR_WIDTH / 3;
+
+        if (isOpen && gestureState.dx < -threshold) {
+          // snap to closed
+          onClose();
+          Animated.timing(slideAnim, {
+            toValue: -SIDEBAR_WIDTH,
+            duration: 250,
+            useNativeDriver: true,
+          }).start();
+        } else {
+          // snap stay open
+          Animated.timing(slideAnim, {
+            toValue: isOpen ? 0 : -SIDEBAR_WIDTH,
+            duration: 250,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  // We no longer need the require hack or the listener here as PanResponder handles it
+  // But let's keep it safe. If the user clicks a button to open, we still want the animation.
+  // The existing useEffect already handles Animated.timing(slideAnim) when isOpen changes.
 
   const navItems = [
     { name: 'Home Feed', icon: <Hash size={20} color={Colors.dark.icon} />, route: '/(main)/' },
@@ -90,7 +141,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   };
 
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 100 }]} pointerEvents={isOpen ? 'auto' : 'none'}>
+    <View
+      style={[StyleSheet.absoluteFill, { zIndex: 100 }]}
+      pointerEvents={isOpen ? 'auto' : 'box-none'}
+      {...panResponder.panHandlers}
+    >
       {/* Backdrop */}
       {isOpen && (
         <TouchableOpacity
@@ -101,7 +156,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       )}
 
       {/* Sidebar Panel */}
-      <Animated.View style={[styles.panel, { transform: [{ translateX: slideAnim }] }]}>
+      <Animated.View style={[
+        styles.panel,
+        {
+          transform: [{ translateX: slideAnim }],
+          paddingTop: insets.top + 20 // Dynamic padding for safe area
+        }
+      ]}>
 
         {/* App Title */}
         <View style={styles.header}>
@@ -159,7 +220,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.background,
     borderRightWidth: 1,
     borderRightColor: Colors.dark.border,
-    paddingTop: 60,
     paddingHorizontal: 20,
     elevation: 5,
     shadowColor: '#000',

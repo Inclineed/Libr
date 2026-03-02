@@ -223,9 +223,12 @@ func RetryPendingModerations() {
 			pendingQueue = append(pendingQueue, map[string]interface{}{
 				"id":           pending.MsgSign,
 				"ts":           pending.MsgCert.Msg.Ts,
+				"content":      pending.MsgCert.Msg.Content,
 				"reason":       pending.MsgCert.Reason,
 				"totalMods":    pending.AckCount,
 				"ackCount":     accCount + rejCount,
+				"approved":     accCount,
+				"rejected":     rejCount,
 				"awaitingMods": len(newAwaiting),
 			})
 		}

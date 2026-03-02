@@ -2,13 +2,71 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { X, Image as ImageIcon, Send } from 'lucide-react-native';
-import LibrCore from '@/modules/LibrCore';
+import LibrCore, { RetMsgCert, SendResult } from '@/modules/LibrCore';
 import { Colors } from '@/constants/theme';
+import { useAppStore } from '@/store/useAppStore';
 
 export default function CreateMessageModal() {
   const router = useRouter();
+  const { state, addMessage, removeMessage } = useAppStore();
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+
+  const handleSend = async () => {
+    const trimmedTitle = title.trim();
+    const trimmedBody = content.trim();
+    if (!trimmedBody) return;
+
+    const fullContent = trimmedTitle ? `<HEAD>${trimmedTitle}</HEAD><BODY>${trimmedBody}</BODY>` : trimmedBody;
+
+    // 1. Optimistic UI: Create a temporary certificate to show immediately
+    const tempCert: RetMsgCert = {
+      public_key: state.publicKey,
+      sign: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      msg: {
+        content: fullContent,
+        ts: Math.floor(Date.now() / 1000),
+      },
+      mod_certs: [],
+      deleted: '0'
+    };
+
+    // 2. Add message to feed local state
+    addMessage(tempCert);
+
+    // 3. Dismiss modal immediately
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+
+    // 4. Background: Perform actual delivery
+    try {
+      const raw: string = await LibrCore.sendTextMessage(fullContent);
+      const result: SendResult = JSON.parse(raw);
+
+      if (result.status === 'sent') {
+        // 5. Replace temp with real data once confirmed
+        removeMessage(tempCert.sign);
+        const realCert: RetMsgCert = {
+          public_key: state.publicKey,
+          sign: result.sign,
+          msg: {
+            content: fullContent,
+            ts: result.ts,
+          },
+          mod_certs: result.mod_certs || [],
+          deleted: '0'
+        };
+        addMessage(realCert);
+      }
+    } catch (e) {
+      console.error('[BackgroundSend]', e);
+      // Optional: notify of failure or keep as "permanent optimistic error state"?
+      // I'll just log for now so it doesn't crash.
+    }
+  };
 
   return (
     <KeyboardAvoidingView
@@ -63,19 +121,7 @@ export default function CreateMessageModal() {
         <TouchableOpacity
           style={[styles.sendBtn, !content.trim() && styles.sendBtnDisabled]}
           disabled={!content.trim()}
-          onPress={async () => {
-            try {
-              const body = title.trim() ? `<HEAD>${title.trim()}</HEAD><BODY>${content.trim()}</BODY>` : content.trim();
-              await LibrCore.sendTextMessage(body);
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace('/');
-              }
-            } catch (e) {
-              console.error(e);
-            }
-          }}
+          onPress={handleSend}
         >
           <Send size={20} color="#fff" />
         </TouchableOpacity>

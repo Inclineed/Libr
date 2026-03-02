@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors as C } from '@/constants/theme';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, Shield } from 'lucide-react-native';
@@ -8,8 +9,8 @@ export default function ModerationScreen() {
     const router = useRouter();
 
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" />
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+            <StatusBar barStyle="light-content" backgroundColor={C.dark.background} />
 
             {/* Header */}
             <View style={styles.header}>
@@ -28,7 +29,7 @@ export default function ModerationScreen() {
                 <Text style={styles.title}>Logs coming soon</Text>
                 <Text style={styles.subtitle}>Detailed moderation logs and decision history will be viewable here in a future update.</Text>
             </View>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -42,7 +43,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 60 : 40,
         paddingBottom: 16,
         backgroundColor: C.dark.background,
         borderBottomWidth: 1,

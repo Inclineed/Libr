@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, Animated, Easing } from 'react-native';
+import { useRef } from 'react';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { SvgXml } from 'react-native-svg';
 import { Colors } from '@/constants/theme';
 import { useAppStore } from '@/store/useAppStore';
 import LibrCore from '@/modules/LibrCore';
 import { Menu, X, Shield, RefreshCcw, ArrowLeft } from 'lucide-react-native';
-import { useSidebar } from './_layout';
 import { useRouter } from 'expo-router';
 
 function getAvatarUri(svg: string | null): string | null {
@@ -21,9 +22,31 @@ function getAvatarUri(svg: string | null): string | null {
 }
 
 export default function ProfileScreen() {
-    const { state } = useAppStore();
+    const insets = useSafeAreaInsets();
+    const { state, setPublicKey } = useAppStore();
     const router = useRouter();
-    const { toggleSidebar } = useSidebar();
+    const [loading, setLoading] = useState(false);
+    const rotateAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        if (loading) {
+            Animated.loop(
+                Animated.timing(rotateAnim, {
+                    toValue: 1,
+                    duration: 1000,
+                    easing: Easing.linear,
+                    useNativeDriver: true,
+                })
+            ).start();
+        } else {
+            rotateAnim.setValue(0);
+        }
+    }, [loading]);
+
+    const spin = rotateAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+    });
 
     // Avatar and Alias generation
     const [alias, setAlias] = useState('…');
@@ -58,10 +81,41 @@ export default function ProfileScreen() {
         }
     }, [state.publicKey]);
 
+    const handleResetIdentity = () => {
+        Alert.alert(
+            'Reset Identity',
+            'This will generate new cryptographic keys. Your alias and avatar will change, and your old identity will be lost. Continue?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Reset',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setLoading(true);
+                        try {
+                            const newKey = await LibrCore.regenKeys();
+                            if (newKey && !newKey.startsWith('error:')) {
+                                setPublicKey(newKey);
+                                Alert.alert('Success', 'Identity has been reset.');
+                            } else {
+                                Alert.alert('Error', newKey || 'Failed to regenerate keys');
+                            }
+                        } catch (err: any) {
+                            Alert.alert('Error', err?.message || 'Failed to reset identity');
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+            <StatusBar barStyle="light-content" backgroundColor={Colors.dark.background} />
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 10) }]}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                     <ArrowLeft size={24} color={Colors.dark.text} />
                 </TouchableOpacity>
@@ -103,9 +157,16 @@ export default function ProfileScreen() {
                     <View style={styles.spacer} />
 
                     {/* Actions */}
-                    <TouchableOpacity style={styles.resetBtn}>
-                        <RefreshCcw size={20} color={Colors.dark.icon} />
-                        <Text style={styles.resetBtnText}>Reset Identity</Text>
+                    <TouchableOpacity
+                        style={[styles.resetBtn, loading && styles.resetBtnLoading]}
+                        onPress={handleResetIdentity}
+                        disabled={loading}
+                        activeOpacity={0.8}
+                    >
+                        <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                            <RefreshCcw size={20} color="#fff" />
+                        </Animated.View>
+                        <Text style={styles.resetBtnText}>{loading ? 'Resetting...' : 'Reset Identity'}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -116,7 +177,7 @@ export default function ProfileScreen() {
                     </TouchableOpacity>
                 </View>
             </View>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -130,7 +191,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 56 : 40,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: Colors.dark.border,
@@ -231,21 +291,28 @@ const styles = StyleSheet.create({
     resetBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.dark.background,
+        backgroundColor: '#ef4444', // Vibrant warning red
         paddingHorizontal: 20,
         paddingVertical: 14,
         borderRadius: 12,
-        borderWidth: 1,
-        borderColor: Colors.dark.border,
         width: '100%',
         justifyContent: 'center',
         marginBottom: 12,
         gap: 8,
+        shadowColor: '#ef4444',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    resetBtnLoading: {
+        opacity: 0.8,
+        backgroundColor: '#991b1b', // Darker red when loading
     },
     resetBtnText: {
-        color: Colors.dark.icon,
+        color: '#fff',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: '700',
     },
     closeBtn: {
         backgroundColor: Colors.dark.tint,

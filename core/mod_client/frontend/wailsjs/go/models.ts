@@ -2,6 +2,9 @@ export namespace main {
 	
 	export class PendingItemStat {
 	    msg_sign: string;
+	    ts: number;
+	    content: string;
+	    reason: string;
 	    approved: number;
 	    rejected: number;
 	    awaiting: number;
@@ -14,6 +17,9 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.msg_sign = source["msg_sign"];
+	        this.ts = source["ts"];
+	        this.content = source["content"];
+	        this.reason = source["reason"];
 	        this.approved = source["approved"];
 	        this.rejected = source["rejected"];
 	        this.awaiting = source["awaiting"];

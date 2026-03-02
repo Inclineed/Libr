@@ -208,7 +208,7 @@ export const apiService = {
   },
 
   async getPendingModerationStats(): Promise<{
-    items: { msg_sign: string; approved: number; rejected: number; awaiting: number; is_image: boolean }[];
+    items: { msg_sign: string; ts: number; content: string; reason: string; approved: number; rejected: number; awaiting: number; is_image: boolean }[];
     cron_active: boolean;
   }> {
     return await GetPendingModerationStats();

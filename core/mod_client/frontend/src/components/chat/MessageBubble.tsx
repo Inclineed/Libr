@@ -95,7 +95,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         className="flex w-full mb-4"
       >
         <div className="w-[99%]">
-          <div className="relative rounded-3xl px-4 py-3 bg-card shadow-md border-b max-w-[80vw] break-words">
+          <div className="relative rounded-3xl px-4 py-3 bg-card shadow-md border-b max-w-[80vw] break-words overflow-hidden">
+            {message.authorPublicKey === user.publicKey && (
+              <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-libr-accent1 rounded-l-3xl" />
+            )}
             <div className="absolute top-3 right-3">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

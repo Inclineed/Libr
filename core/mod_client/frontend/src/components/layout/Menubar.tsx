@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserOpenURL } from '../../../wailsjs/runtime';
-import { PencilLine, Globe, Database, Copyright } from 'lucide-react';
+import { PencilLine, Globe, Database, Copyright, ChevronDown, ChevronRight, ImageIcon, FileText, Flag, CheckCircle2, XCircle, X } from 'lucide-react';
 import { logger } from '../../logger/logger';
 import { EventsOn } from "../../../wailsjs/runtime";
 import { toast } from "sonner";
@@ -42,9 +42,18 @@ const ComingSoonDialog: React.FC<{ open: boolean; onClose: () => void }> = ({ op
 
 
 export const Menubar: React.FC = () => {
+  type ResolvedItem = PendingModeration & { finalStatus: 'approved' | 'rejected' };
+
   const [mods, setMods] = React.useState<ModDisplay[]>([]);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [queueOpen, setQueueOpen] = React.useState(true);
+  const [expandedItem, setExpandedItem] = React.useState<string | null>(null);
+  const [resolvedItems, setResolvedItems] = React.useState<ResolvedItem[]>([]);
   const { pendingQueue, setPendingQueue } = useAppStore();
+
+  // Keep a ref so event handlers always see the latest queue without re-subscribing
+  const pendingQueueRef = React.useRef<PendingModeration[]>(pendingQueue);
+  React.useEffect(() => { pendingQueueRef.current = pendingQueue; }, [pendingQueue]);
 
   React.useEffect(() => {
     // Seed from Go on every mount so the queue is current after a tab switch
@@ -52,10 +61,13 @@ export const Menubar: React.FC = () => {
       if (!stats?.items) return;
       const queue: PendingModeration[] = stats.items.map((item: any) => ({
         id: item.msg_sign,
-        ts: 0,
-        reason: item.is_image ? 'Image attached' : 'Message',
+        ts: item.ts ?? 0,
+        content: item.content ?? '',
+        reason: item.reason ?? (item.is_image ? 'Image attached' : ''),
+        approved: item.approved,
+        rejected: item.rejected,
         totalMods: item.approved + item.rejected + item.awaiting,
-        ackCount: item.approved,
+        ackCount: item.approved + item.rejected,
         awaitingMods: item.awaiting,
       }));
       setPendingQueue(queue);
@@ -66,13 +78,28 @@ export const Menubar: React.FC = () => {
       setPendingQueue(queue || []);
     });
 
-    // Toast notifications for finalized items
+    // Toast + retain finalized items in the queue with a status badge
     const unsubFinalized = EventsOn("moderation_finalized", (event: { status: string; id: string }) => {
-      if (event.status === "approved") {
+      const finalStatus = event.status === "approved" ? 'approved' : 'rejected';
+
+      if (finalStatus === 'approved') {
         toast.success(`Message Approved (${event.id.substring(0, 8)}...)`);
       } else {
         toast.error(`Message Rejected (${event.id.substring(0, 8)}...)`);
       }
+
+      // Find the item in the current queue snapshot
+      const source = pendingQueueRef.current.find(q => q.id === event.id);
+      const resolved: ResolvedItem = source
+        ? { ...source, finalStatus }
+        : { id: event.id, ts: 0, content: '', reason: '', approved: 0, rejected: 0, totalMods: 0, ackCount: 0, awaitingMods: 0, finalStatus };
+
+      setResolvedItems(prev => [...prev.filter(r => r.id !== event.id), resolved]);
+
+      // Auto-dismiss after 30 seconds
+      setTimeout(() => {
+        setResolvedItems(prev => prev.filter(r => r.id !== event.id));
+      }, 30_000);
     });
 
     return () => {
@@ -143,41 +170,210 @@ export const Menubar: React.FC = () => {
         </div>
 
         {/* Pending Moderation Queue */}
-        <div className="text-left w-full mt-4 mb-2 pl-2 flex items-center">
-          <h3 className="text-sm font-semibold text-muted-foreground flex items-center justify-between w-[90%]">
-            <span>Moderation Queue</span>
-            {pendingQueue.length > 0 && (
+        <button
+          onClick={() => setQueueOpen(prev => !prev)}
+          className="text-left w-full mt-4 mb-2 pl-2 pr-2 flex items-center hover:opacity-80 transition-opacity"
+        >
+          <div className="text-sm font-semibold text-muted-foreground flex items-center justify-between w-full">
+            <span className="flex items-center gap-1.5">
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-200 ${queueOpen ? '' : '-rotate-90'}`}
+              />
+              Moderation Queue
+            </span>
+            {(pendingQueue.length + resolvedItems.length) > 0 && (
               <span className="bg-libr-accent1 text-white text-xs px-2 py-0.5 rounded-full">
-                {pendingQueue.length}
+                {pendingQueue.length + resolvedItems.length}
               </span>
             )}
-          </h3>
-        </div>
+          </div>
+        </button>
 
-        <div className="flex flex-col gap-2 w-full pl-2 pr-2 pb-4">
-          {pendingQueue.length === 0 ? (
-            <p className="text-xs text-muted-foreground pl-1">No items pending.</p>
-          ) : (
-            pendingQueue.map((item) => (
-              <div key={item.id} className="bg-muted/30 rounded-lg p-3 text-xs flex flex-col gap-1 border border-border/50">
-                <div className="flex justify-between items-start">
-                  <span className="font-semibold text-libr-accent1 w-[80%] break-words">
-                    {item.reason || "Manual Report"}
-                  </span>
-                  <span className="text-muted-foreground opacity-70">
-                    {new Date(item.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center mt-1 pt-1 border-t border-border/30">
-                  <span className="text-muted-foreground">Waiting on:</span>
-                  <span className="font-mono bg-background px-1.5 py-0.5 rounded border border-border/50">
-                    {item.awaitingMods} / {item.totalMods} mods
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+        {queueOpen && (
+          <div className="flex flex-col gap-2 w-full pl-2 pr-2 pb-4">
+            {pendingQueue.length === 0 && resolvedItems.length === 0 ? (
+              <p className="text-xs text-muted-foreground pl-1">No items pending.</p>
+            ) : (
+              <>
+                {/* Active pending items */}
+                {pendingQueue.map((item) => {
+                  const isOpen = expandedItem === item.id;
+                  const isImage = item.reason === 'Image attached';
+                  const isReport = !isImage && !!item.reason;
+
+                  const rawText = item.content
+                    ? item.content
+                        .replace(/<HEAD>[\s\S]*?<\/HEAD>/gi, '')
+                        .replace(/<BODY>([\s\S]*?)<\/BODY>/gi, '$1')
+                        .replace(/<[^>]+>/g, '')
+                        .trim()
+                    : '';
+                  const preview = rawText.length > 0
+                    ? rawText.substring(0, 40) + (rawText.length > 40 ? '…' : '')
+                    : null;
+
+                  const TypeIcon = isImage ? ImageIcon : isReport ? Flag : FileText;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="bg-muted/30 rounded-lg border border-border/50 overflow-hidden cursor-pointer hover:border-libr-accent1/40 transition-colors"
+                      onClick={() => setExpandedItem(isOpen ? null : item.id)}
+                    >
+                      {/* Collapsed row */}
+                      <div className="flex items-center justify-between p-3 text-xs gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <ChevronRight
+                            className={`w-3 h-3 text-muted-foreground flex-shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}
+                          />
+                          <TypeIcon className="w-3 h-3 text-libr-accent1 flex-shrink-0" />
+                          <span className="font-semibold text-libr-accent1 truncate">
+                            {preview ?? (isImage ? 'Image message' : isReport ? item.reason : 'Pending message')}
+                          </span>
+                        </div>
+                        <span className="text-muted-foreground/70 flex-shrink-0 tabular-nums">
+                          {item.ts > 0
+                            ? new Date(item.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : '—'}
+                        </span>
+                      </div>
+
+                      {/* Expanded details */}
+                      {isOpen && (
+                        <div className="px-3 pb-3 pt-1 border-t border-border/30 text-xs flex flex-col gap-2">
+                          {isImage ? (
+                            <div className="flex items-center gap-1.5 text-muted-foreground italic">
+                              <ImageIcon className="w-3 h-3" />
+                              <span>Image attachment</span>
+                            </div>
+                          ) : rawText.length > 0 ? (
+                            <div className="text-foreground/80 leading-relaxed break-words bg-background/40 rounded-md px-2.5 py-2 border border-border/30">
+                              {rawText.substring(0, 200)}{rawText.length > 200 ? '…' : ''}
+                            </div>
+                          ) : null}
+
+                          {isReport && (
+                            <div className="flex items-center gap-1">
+                              <Flag className="w-2.5 h-2.5 text-yellow-400" />
+                              <span className="text-yellow-400/80">{item.reason}</span>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-3 gap-1">
+                            <div className="flex flex-col items-center bg-green-500/10 rounded px-1.5 py-1.5 border border-green-500/20">
+                              <span className="text-green-400 font-bold text-sm leading-none">{item.approved}</span>
+                              <span className="text-muted-foreground text-[10px] mt-0.5">approved</span>
+                            </div>
+                            <div className="flex flex-col items-center bg-red-500/10 rounded px-1.5 py-1.5 border border-red-500/20">
+                              <span className="text-red-400 font-bold text-sm leading-none">{item.rejected}</span>
+                              <span className="text-muted-foreground text-[10px] mt-0.5">rejected</span>
+                            </div>
+                            <div className="flex flex-col items-center bg-yellow-500/10 rounded px-1.5 py-1.5 border border-yellow-500/20">
+                              <span className="text-yellow-400 font-bold text-sm leading-none">{item.awaitingMods}</span>
+                              <span className="text-muted-foreground text-[10px] mt-0.5">waiting</span>
+                            </div>
+                          </div>
+
+                          <div className="font-mono text-muted-foreground/50 text-[10px] break-all">
+                            {item.id.substring(0, 24)}…
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Finalized items — stay visible until dismissed or auto-cleared */}
+                {resolvedItems.map((item) => {
+                  const isApproved = item.finalStatus === 'approved';
+                  const isOpen = expandedItem === item.id;
+                  const isImage = item.reason === 'Image attached';
+                  const isReport = !isImage && !!item.reason;
+                  const borderColor = isApproved ? 'border-green-500/40' : 'border-red-500/40';
+                  const bgColor = isApproved ? 'bg-green-500/5' : 'bg-red-500/5';
+
+                  const rawText = item.content
+                    ? item.content
+                        .replace(/<HEAD>[\s\S]*?<\/HEAD>/gi, '')
+                        .replace(/<BODY>([\s\S]*?)<\/BODY>/gi, '$1')
+                        .replace(/<[^>]+>/g, '')
+                        .trim()
+                    : '';
+                  const preview = rawText.length > 0
+                    ? rawText.substring(0, 40) + (rawText.length > 40 ? '…' : '')
+                    : null;
+
+                  const StatusIcon = isApproved ? CheckCircle2 : XCircle;
+                  const statusColor = isApproved ? 'text-green-400' : 'text-red-400';
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}
+                    >
+                      {/* Header row */}
+                      <div
+                        className="flex items-center justify-between p-3 text-xs gap-2 cursor-pointer"
+                        onClick={() => setExpandedItem(isOpen ? null : item.id)}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <ChevronRight
+                            className={`w-3 h-3 text-muted-foreground flex-shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}
+                          />
+                          <StatusIcon className={`w-3.5 h-3.5 ${statusColor} flex-shrink-0`} />
+                          <span className={`font-semibold ${statusColor} truncate`}>
+                            {preview ?? (isImage ? 'Image message' : isReport ? item.reason : 'Message')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <span className={`font-semibold uppercase text-[10px] tracking-wide ${statusColor}`}>
+                            {item.finalStatus}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setResolvedItems(prev => prev.filter(r => r.id !== item.id));
+                            }}
+                            className="text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded details */}
+                      {isOpen && (
+                        <div className="px-3 pb-3 pt-1 border-t border-border/20 text-xs flex flex-col gap-2">
+                          {isImage ? (
+                            <div className="flex items-center gap-1.5 text-muted-foreground italic">
+                              <ImageIcon className="w-3 h-3" />
+                              <span>Image attachment</span>
+                            </div>
+                          ) : rawText.length > 0 ? (
+                            <div className="text-foreground/70 leading-relaxed break-words bg-background/30 rounded-md px-2.5 py-2 border border-border/20">
+                              {rawText.substring(0, 200)}{rawText.length > 200 ? '…' : ''}
+                            </div>
+                          ) : null}
+
+                          {isReport && (
+                            <div className="flex items-center gap-1">
+                              <Flag className="w-2.5 h-2.5 text-yellow-400" />
+                              <span className="text-yellow-400/80">{item.reason}</span>
+                            </div>
+                          )}
+
+                          <div className="font-mono text-muted-foreground/40 text-[10px] break-all">
+                            {item.id.substring(0, 24)}…
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="rounded-3xl m-2 bg-card w-[92%]">

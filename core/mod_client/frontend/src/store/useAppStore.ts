@@ -50,7 +50,10 @@ export interface ModLogEntry {
 export interface PendingModeration {
   id: string;
   ts: number;
+  content: string;
   reason: string;
+  approved: number;
+  rejected: number;
   totalMods: number;
   ackCount: number;
   awaitingMods: number;

@@ -1,8 +1,10 @@
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import React from 'react';
+import { useKeepAwake } from 'expo-keep-awake';
 import { Text, View, ScrollView } from 'react-native';
 
 import { Colors } from '@/constants/theme';
@@ -53,17 +55,20 @@ class ErrorBoundary extends React.Component<
 }
 
 export default function RootLayout() {
+  useKeepAwake();
   return (
-    <ErrorBoundary>
-      <AppStoreProvider>
-        <ThemeProvider value={DarkNavyTheme}>
-          <Stack>
-            <Stack.Screen name="(main)" options={{ headerShown: false }} />
-            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-          </Stack>
-          <StatusBar style="light" />
-        </ThemeProvider>
-      </AppStoreProvider>
-    </ErrorBoundary>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <AppStoreProvider>
+          <ThemeProvider value={DarkNavyTheme}>
+            <Stack>
+              <Stack.Screen name="(main)" options={{ headerShown: false }} />
+              <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+            </Stack>
+            <StatusBar style="light" />
+          </ThemeProvider>
+        </AppStoreProvider>
+      </ErrorBoundary>
+    </SafeAreaProvider>
   );
 }

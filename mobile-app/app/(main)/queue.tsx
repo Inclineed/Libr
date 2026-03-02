@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, RefreshControl, ActivityIndicator, StatusBar, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors as C } from '@/constants/theme';
 import LibrCore from '@/modules/LibrCore';
 import { useAppStore } from '@/store/useAppStore';
@@ -113,8 +114,8 @@ export default function QueueScreen() {
     };
 
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" />
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+            <StatusBar barStyle="light-content" backgroundColor={C.dark.background} />
 
             {/* Header */}
             <View style={styles.header}>
@@ -154,7 +155,7 @@ export default function QueueScreen() {
                     }
                 />
             )}
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -168,7 +169,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 60 : 40,
         paddingBottom: 16,
         backgroundColor: C.dark.background,
         borderBottomWidth: 1,

@@ -452,6 +452,9 @@ func (a *App) ModerateBySign(sign string, moderated int) {
 // PendingItemStat is returned by GetPendingModerationStats for each pending message.
 type PendingItemStat struct {
 	MsgSign  string `json:"msg_sign"`
+	Ts       int64  `json:"ts"`
+	Content  string `json:"content"`
+	Reason   string `json:"reason"`
 	Approved int    `json:"approved"`
 	Rejected int    `json:"rejected"`
 	Awaiting int    `json:"awaiting"`
@@ -490,6 +493,9 @@ func (a *App) GetPendingModerationStats() PendingModerationStats {
 		}
 		stats.Items = append(stats.Items, PendingItemStat{
 			MsgSign:  pending.MsgSign,
+			Ts:       pending.MsgCert.Msg.Ts,
+			Content:  pending.MsgCert.Msg.Content,
+			Reason:   pending.MsgCert.Reason,
 			Approved: approved,
 			Rejected: rejected,
 			Awaiting: len(pending.AwaitingMods),

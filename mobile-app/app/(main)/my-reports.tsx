@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, SafeAreaView, Platform, StatusBar } from 'react-native';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, StatusBar } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Flag, CheckCircle, Clock } from 'lucide-react-native';
 import { useAppStore } from '@/store/useAppStore';
@@ -20,6 +21,7 @@ const C = {
 export default function MyReportsScreen() {
     const router = useRouter();
     const { state } = useAppStore();
+    const insets = useSafeAreaInsets();
     const [reportedMessages, setReportedMessages] = useState<RetMsgCert[]>([]);
     const [pendingStatus, setPendingStatus] = useState<Record<string, { total: number, approved: number, rejected: number }>>({});
     const [loading, setLoading] = useState(true);
@@ -88,7 +90,7 @@ export default function MyReportsScreen() {
     }, [state.reportedSigns, state.messages]);
 
     const renderItem = ({ item }: { item: RetMsgCert }) => {
-        const isApproved = Array.isArray(item.mod_certs) && item.mod_certs.length > 0;
+        const isApproved = item.deleted === '1';
 
         // Extract plain content
         let rawContent = item.msg.content;
@@ -156,8 +158,10 @@ export default function MyReportsScreen() {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
-            <View style={styles.header}>
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
+            <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+            {/* Header */}
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 10) }]}>
                 <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
                     <ArrowLeft size={24} color={C.text} />
                 </TouchableOpacity>
@@ -190,7 +194,6 @@ const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
         backgroundColor: C.bg,
-        paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
     },
     header: {
         flexDirection: 'row',
