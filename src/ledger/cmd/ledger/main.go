@@ -49,23 +49,67 @@ func main() {
 		port = "9000"
 	}
 
-	// --- Relay TTL -------------------------------------------------------
-	// LEDGER_RELAY_TTL: duration after which a relay is considered stale.
-	//   Example: "30m", "1h". Zero / unset disables TTL eviction.
+	// --- Timing / TTL config -------------------------------------------
+	// LEDGER_ENTRY_TTL: window used to filter live mods and nodes in GET
+	//   responses (e.g. "3m"). Zero / unset returns all entries.
+	// LEDGER_RELAY_TTL: duration after which a relay is evicted (in-memory
+	//   only). Zero / unset disables relay eviction.
 	// LEDGER_CLEANUP_INTERVAL: how often the background cleaner runs.
-	//   Default: 5 minutes.
+	entryTTL := envDuration("LEDGER_ENTRY_TTL", 3*time.Minute)
 	relayTTL := envDuration("LEDGER_RELAY_TTL", 0)
-	cleanupInterval := envDuration("LEDGER_CLEANUP_INTERVAL", 5*time.Minute)
+	cleanupInterval := envDuration("LEDGER_CLEANUP_INTERVAL", 90*time.Second)
 
-	var store *ledger.InMemoryStore
-	if relayTTL > 0 {
-		store = ledger.NewInMemoryStoreWithTTL(relayTTL)
-		log.Printf("relay TTL enabled: ttl=%s cleanup_interval=%s", relayTTL, cleanupInterval)
+	// Signal context — used for clean shutdown and stopping background jobs.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// --- Storage backend -----------------------------------------------
+	// MONGO_URI: if set, use MongoDB (database "Addrs") for persistence.
+	//   Mirrors the schema of the legacy JS relay server.
+	// If unset, fall back to in-memory storage (data lost on restart).
+	var stores ledger.LedgerStores
+	var mongoStore *ledger.MongoStore
+	var inMemStore *ledger.InMemoryStore
+
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI != "" {
+		ms, err := ledger.NewMongoStore(ctx, mongoURI)
+		if err != nil {
+			log.Fatalf("failed to connect to MongoDB: %v", err)
+		}
+		mongoStore = ms
+
+		// Create indexes; use entryTTL as the server-side TTL for nodes/mods.
+		if err := mongoStore.EnsureIndexes(ctx, entryTTL, entryTTL); err != nil {
+			log.Printf("warning: failed to ensure MongoDB indexes: %v", err)
+		}
+
+		// Application-level expiry sweep (belt-and-suspenders alongside TTL indexes).
+		mongoStore.StartCleanup(ctx, cleanupInterval, entryTTL)
+
+		stores = ledger.LedgerStores{
+			Relays: mongoStore,
+			Nodes:  mongoStore,
+			Mods:   mongoStore,
+		}
+		log.Printf("storage: MongoDB uri=%s", mongoURI)
 	} else {
-		store = ledger.NewInMemoryStore()
+		if relayTTL > 0 {
+			inMemStore = ledger.NewInMemoryStoreWithTTL(relayTTL)
+			log.Printf("storage: in-memory with TTL ttl=%s cleanup_interval=%s", relayTTL, cleanupInterval)
+		} else {
+			inMemStore = ledger.NewInMemoryStore()
+			log.Printf("storage: in-memory (no TTL eviction)")
+		}
+		inMemStore.StartCleanup(ctx, cleanupInterval)
+		stores = ledger.LedgerStores{
+			Relays: inMemStore,
+			Nodes:  inMemStore,
+			Mods:   inMemStore,
+		}
 	}
 
-	// --- Rate limiting ---------------------------------------------------
+	// --- Rate limiting --------------------------------------------------
 	// LEDGER_RATE_LIMIT: max requests per IP per window (default: 60).
 	// LEDGER_RATE_WINDOW: window duration (default: 1m).
 	rateLimit := envInt("LEDGER_RATE_LIMIT", 60)
@@ -77,11 +121,9 @@ func main() {
 		log.Printf("rate limiting enabled: limit=%d window=%s", rateLimit, rateWindow)
 	}
 
-	// --- Signature validation --------------------------------------------
+	// --- Signature validation -------------------------------------------
 	// LEDGER_VALIDATE_SIGNATURES: set to "true" to require Ed25519
-	// signatures on PUT /relays. peer_id must be the base64-encoded
-	// 32-byte Ed25519 public key; the request must include a "signature"
-	// field (base64 Ed25519 sig over "<peer_id>:<ws_address>").
+	// signatures on PUT /relays.
 	validateSigs := os.Getenv("LEDGER_VALIDATE_SIGNATURES") == "true"
 	if validateSigs {
 		log.Printf("relay signature validation enabled")
@@ -90,23 +132,17 @@ func main() {
 	cfg := ledger.ServerConfig{
 		RateLimiter:        rl,
 		ValidateSignatures: validateSigs,
+		EntryTTL:           entryTTL,
 	}
 
-	handler := ledger.NewServerWithConfig(store, cfg)
+	handler := ledger.NewServerWithConfig(stores, cfg)
 
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: handler,
 	}
 
-	// Start TTL cleanup goroutine (no-op when TTL is disabled).
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	store.StartCleanup(ctx, cleanupInterval)
-
 	errCh := make(chan error, 1)
-
 	go func() {
 		log.Printf("ledger server starting on :%s", port)
 		err := server.ListenAndServe()
@@ -124,6 +160,13 @@ func main() {
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			log.Printf("graceful shutdown failed: %v", err)
 			os.Exit(1)
+		}
+
+		// Disconnect MongoDB cleanly if in use.
+		if mongoStore != nil {
+			if err := mongoStore.Close(shutdownCtx); err != nil {
+				log.Printf("failed to close MongoDB connection: %v", err)
+			}
 		}
 	case err := <-errCh:
 		if err != nil {
