@@ -1,23 +1,66 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { X, Image as ImageIcon, Send } from 'lucide-react-native';
+import { X, Image as ImageIcon, Send, XCircle } from 'lucide-react-native';
 import LibrCore, { RetMsgCert, SendResult } from '@/modules/LibrCore';
 import { Colors } from '@/constants/theme';
 import { useAppStore } from '@/store/useAppStore';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { Image } from 'expo-image';
 
 export default function CreateMessageModal() {
   const router = useRouter();
   const { state, addMessage, removeMessage } = useAppStore();
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [pendingImages, setPendingImages] = useState<string[]>([]); // base64 strings
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handlePickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setIsProcessing(true);
+        const { uri } = result.assets[0];
+
+        // 1. Resize and compress like desktop (max 800px)
+        const manipResult = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: 800 } }],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        );
+
+        if (manipResult.base64) {
+          setPendingImages((prev: string[]) => [...prev, `data:image/jpeg;base64,${manipResult.base64}`]);
+        }
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Failed to pick image');
+      console.error(e);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setPendingImages((prev: string[]) => prev.filter((_: string, i: number) => i !== index));
+  };
 
   const handleSend = async () => {
     const trimmedTitle = title.trim();
     const trimmedBody = content.trim();
-    if (!trimmedBody) return;
+    if (!trimmedBody && pendingImages.length === 0) return;
 
-    const fullContent = trimmedTitle ? `<HEAD>${trimmedTitle}</HEAD><BODY>${trimmedBody}</BODY>` : trimmedBody;
+    const imagesHtml = pendingImages.map((src: string) => `<img src="${src}" />`).join('');
+    const bodyWithImages = `<BODY>${trimmedBody}${imagesHtml}</BODY>`;
+
+    const fullContent = trimmedTitle ? `<HEAD>${trimmedTitle}</HEAD>${bodyWithImages}` : bodyWithImages;
 
     // 1. Optimistic UI: Create a temporary certificate to show immediately
     const tempCert: RetMsgCert = {
@@ -46,7 +89,11 @@ export default function CreateMessageModal() {
       const raw: string = await LibrCore.sendTextMessage(fullContent);
       const result: SendResult = JSON.parse(raw);
 
-      if (result.status === 'sent') {
+      if (result.status === 'sent' || result.status === 'pending_manual') {
+        if (result.status === 'pending_manual') {
+          Alert.alert('Manual Approval', 'Message contains an image and has been sent for manual approval.');
+        }
+
         // 5. Replace temp with real data once confirmed
         removeMessage(tempCert.sign);
         const realCert: RetMsgCert = {
@@ -60,6 +107,8 @@ export default function CreateMessageModal() {
           deleted: '0'
         };
         addMessage(realCert);
+      } else {
+        Alert.alert('Send Failed', result.status || 'Unknown error');
       }
     } catch (e) {
       console.error('[BackgroundSend]', e);
@@ -109,18 +158,42 @@ export default function CreateMessageModal() {
           textAlignVertical="top"
           value={content}
           onChangeText={setContent}
-          autoFocus
+          autoFocus={!isProcessing}
         />
+
+        {pendingImages.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageSelector}>
+            {pendingImages.map((src: string, index: number) => (
+              <View key={index} style={styles.imageThumbContainer}>
+                <Image source={src} style={styles.imageThumb} />
+                <TouchableOpacity
+                  style={styles.removeBtn}
+                  onPress={() => removeImage(index)}
+                >
+                  <XCircle size={20} color={'#ef4444'} fill={Colors.dark.background} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.attachBtn}>
-          <ImageIcon size={24} color={Colors.dark.icon} />
+        <TouchableOpacity
+          style={styles.attachBtn}
+          onPress={handlePickImage}
+          disabled={isProcessing}
+        >
+          {isProcessing ? (
+            <View style={{ width: 24, height: 24, borderRadius: 12, borderTopColor: Colors.dark.tint, borderWidth: 2 }} />
+          ) : (
+            <ImageIcon size={24} color={Colors.dark.icon} />
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.sendBtn, !content.trim() && styles.sendBtnDisabled]}
-          disabled={!content.trim()}
+          style={[styles.sendBtn, (!content.trim() && pendingImages.length === 0) && styles.sendBtnDisabled]}
+          disabled={!content.trim() && pendingImages.length === 0}
           onPress={handleSend}
         >
           <Send size={20} color="#fff" />
@@ -186,5 +259,27 @@ const styles = StyleSheet.create({
   sendBtnDisabled: {
     opacity: 0.4,
     shadowOpacity: 0,
+  },
+  imageSelector: {
+    maxHeight: 120,
+    marginTop: 10,
+  },
+  imageThumbContainer: {
+    marginRight: 10,
+    position: 'relative',
+    paddingVertical: 10,
+  },
+  imageThumb: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+  },
+  removeBtn: {
+    position: 'absolute',
+    top: 0,
+    right: -5,
+    zIndex: 1,
   }
 });

@@ -6,6 +6,7 @@ import LibrCore from '@/modules/LibrCore';
 import { useAppStore } from '@/store/useAppStore';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, Flag, Check, X, ShieldAlert, Clock, AlertTriangle } from 'lucide-react-native';
+import { Image } from 'expo-image';
 
 interface ReportCert {
     msgcert: {
@@ -70,6 +71,21 @@ export default function QueueScreen() {
     const renderReport = ({ item }: { item: ReportCert }) => {
         const date = new Date(item.msgcert.msg.ts * 1000).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
 
+
+        // Extract content and images
+        let rawContent = item.msgcert.msg.content;
+        const matchBody = rawContent.match(/<BODY>(.*?)<\/BODY>/s);
+        if (matchBody) rawContent = matchBody[1].trim();
+
+        const imgSrcs: string[] = [];
+        const imgRegex = /<img[^>]+src="([^">]+)"/g;
+        let match;
+        while ((match = imgRegex.exec(rawContent)) !== null) {
+            imgSrcs.push(match[1]);
+        }
+
+        const plainContent = rawContent.replace(/<\/?[^>]+(>|$)/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+
         return (
             <View style={styles.card}>
                 <View style={styles.cardHeader}>
@@ -82,7 +98,22 @@ export default function QueueScreen() {
                 </View>
 
                 <View style={styles.contentBox}>
-                    <Text style={styles.contentText}>{item.msgcert.msg.content}</Text>
+                    {plainContent ? (
+                        <Text style={styles.contentText}>{plainContent}</Text>
+                    ) : null}
+
+                    {imgSrcs.length > 0 && (
+                        <View style={styles.imageGallery}>
+                            {imgSrcs.map((src, i) => (
+                                <Image
+                                    key={i}
+                                    source={src}
+                                    style={styles.queueImage}
+                                    contentFit="cover"
+                                />
+                            ))}
+                        </View>
+                    )}
                 </View>
 
                 <View style={styles.cardFooter}>
@@ -291,5 +322,19 @@ const styles = StyleSheet.create({
         color: C.dark.text,
         fontSize: 16,
         fontWeight: '600',
+    },
+    imageGallery: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 10,
+    },
+    queueImage: {
+        width: 100,
+        height: 100,
+        borderRadius: 8,
+        backgroundColor: '#1a2235',
+        borderWidth: 1,
+        borderColor: C.dark.border,
     },
 });

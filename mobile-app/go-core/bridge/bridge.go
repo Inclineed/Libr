@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -194,12 +194,94 @@ func AmIMod() bool {
 
 // ── Messaging ─────────────────────────────────────────────────────────────────
 
-// SendTextMessage sends a plain-text message through the moderation pipeline
-// and stores the resulting MsgCert on the Kademlia network.
+// SendTextMessage sends a plain-text message through the moderation pipeline.
+// If an image is detected, it automatically switches to the "manual_mod" route.
 // Returns a JSON-encoded types.SendResult, or an error string prefixed "error:".
 func SendTextMessage(content string) string {
 	ts := time.Now().Unix()
 
+	// 1. Detection: Is this an image message?
+	// Mobile encodes images as <img src="data:image/jpeg;base64,..."/> inside <BODY>.
+	// Use strings.Contains so the check is reliable regardless of where in the
+	// content the img tag appears (the byte-loop equivalent missed edge cases).
+	isImage := strings.Contains(content, "data:image") || strings.Contains(content, "<img ")
+
+	if isImage {
+		// ── MANUAL ROUTE (Images) — mirrors desktop SendImageInput ──
+		msgCert := types.MsgCert{
+			PublicKey: base64.StdEncoding.EncodeToString(keycache.PubKey),
+			Msg: types.Msg{
+				Content: content,
+				Ts:      ts,
+			},
+			Reason: "Image attached",
+			Type:   "manual_mod",
+		}
+
+		// Sign it so it follows the protocol
+		dataToSign := types.DataToSign{
+			Content:   content,
+			Timestamp: ts,
+			ModCerts:  []types.ModCert{},
+		}
+		jsonBytes, _ := json.Marshal(dataToSign)
+		_, sign, err := cryptoutils.SignMessage(keycache.PrivKey, string(jsonBytes))
+		if err != nil {
+			b, _ := json.Marshal(types.SendResult{Status: "error:signing"})
+			return string(b)
+		}
+		msgCert.Sign = sign
+
+		// Get online mods — treat fetch error the same as no mods available
+		mods, err := util.GetOnlineMods()
+		if err != nil || len(mods) == 0 {
+			b, _ := json.Marshal(types.SendResult{Status: "error:no_mods"})
+			return string(b)
+		}
+
+		// Wrap ManualSendToMods in a 4-second timeout, matching desktop SendImageInput
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+
+		modChan := make(chan []types.ModCert, 1)
+		go func() {
+			modChan <- core.ManualSendToMods(msgCert, mods, "Image attached", true)
+		}()
+
+		var modcertlist []types.ModCert
+		select {
+		case modcertlist = <-modChan:
+		case <-ctx.Done():
+			b, _ := json.Marshal(types.SendResult{Status: "timeout"})
+			return string(b)
+		}
+
+		// nil means ManualSendToMods could not reach any mod
+		if modcertlist == nil {
+			b, _ := json.Marshal(types.SendResult{Status: "error:no_mods"})
+			return string(b)
+		}
+
+		// Empty list means all mods acknowledged — pending async review
+		if len(modcertlist) == 0 {
+			b, _ := json.Marshal(types.SendResult{
+				Status: "pending_manual",
+				Sign:   msgCert.Sign,
+				Ts:     ts,
+			})
+			return string(b)
+		}
+
+		b, _ := json.Marshal(types.SendResult{
+			Status:   "sent",
+			ModCerts: modcertlist,
+			Sign:     msgCert.Sign,
+			Ts:       ts,
+		})
+		return string(b)
+	}
+
+	// ── AUTO ROUTE (Text) ──
 	modcerts, err := core.AutoSendToMods(content, ts)
 	if err != nil || len(modcerts) == 0 {
 		status := "rejected"
@@ -218,7 +300,6 @@ func SendTextMessage(content string) string {
 	dbStatus := "stored"
 	if dbErr != nil {
 		dbStatus = fmt.Sprintf("db_error:%v", dbErr)
-		log.Printf("[SendTextMessage] SendToDb failed: %v", dbErr)
 	}
 
 	result := types.SendResult{

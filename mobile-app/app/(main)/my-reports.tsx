@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { ArrowLeft, Flag, CheckCircle, Clock } from 'lucide-react-native';
 import { useAppStore } from '@/store/useAppStore';
 import LibrCore, { RetMsgCert } from '@/modules/LibrCore';
+import { Image } from 'expo-image';
 
 const C = {
     bg: '#0a0f1c',
@@ -98,6 +99,15 @@ export default function MyReportsScreen() {
         if (matchBody) rawContent = matchBody[1].trim();
         const plainContent = rawContent.replace(/<\/?[^>]+(>|$)/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
 
+
+        // Extract images
+        const imgSrcs: string[] = [];
+        const imgRegex = /<img[^>]+src="([^">]+)"/g;
+        let match;
+        while ((match = imgRegex.exec(item.msg.content)) !== null) {
+            imgSrcs.push(match[1]);
+        }
+
         return (
             <View style={styles.card}>
                 <View style={styles.cardHeader}>
@@ -107,9 +117,24 @@ export default function MyReportsScreen() {
                     </Text>
                 </View>
 
-                <Text style={styles.contentText} numberOfLines={2}>
-                    {plainContent || "<Media Message>"}
-                </Text>
+                {plainContent ? (
+                    <Text style={styles.contentText} numberOfLines={2}>
+                        {plainContent}
+                    </Text>
+                ) : null}
+
+                {imgSrcs.length > 0 && (
+                    <View style={styles.imageGallery}>
+                        {imgSrcs.map((src, i) => (
+                            <Image
+                                key={i}
+                                source={src}
+                                style={styles.reportImage}
+                                contentFit="cover"
+                            />
+                        ))}
+                    </View>
+                )}
 
                 <View style={styles.statusRow}>
                     {isApproved ? (
@@ -318,5 +343,19 @@ const styles = StyleSheet.create({
         color: C.muted,
         marginLeft: 8,
         fontWeight: '600',
-    }
+    },
+    imageGallery: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginBottom: 12,
+    },
+    reportImage: {
+        width: 80,
+        height: 80,
+        borderRadius: 8,
+        backgroundColor: '#1a2235',
+        borderWidth: 1,
+        borderColor: C.border,
+    },
 });
