@@ -92,6 +92,8 @@ type RelayServer struct {
 	port          int
 	ledgerBaseURL string
 	wsAddress     string
+	tlsCert       string
+	tlsKey        string
 
 	httpServer *http.Server
 	httpClient *http.Client
@@ -139,7 +141,13 @@ func main() {
 		log.Printf("LEDGER_BASE_URL not set, defaulting to %s", ledgerBaseURL)
 	}
 
-	server, err := NewRelayServer(relayPeerID, port, ledgerBaseURL)
+	tlsCert := strings.TrimSpace(os.Getenv("RELAY_TLS_CERT"))
+	tlsKey := strings.TrimSpace(os.Getenv("RELAY_TLS_KEY"))
+	if (tlsCert == "") != (tlsKey == "") {
+		log.Fatalf("RELAY_TLS_CERT and RELAY_TLS_KEY must both be set or both be unset")
+	}
+
+	server, err := NewRelayServer(relayPeerID, port, ledgerBaseURL, tlsCert, tlsKey)
 	if err != nil {
 		log.Fatalf("failed to create relay server: %v", err)
 	}
@@ -149,16 +157,22 @@ func main() {
 	}
 }
 
-func NewRelayServer(peerID string, port int, ledgerBaseURL string) (*RelayServer, error) {
+func NewRelayServer(peerID string, port int, ledgerBaseURL, tlsCert, tlsKey string) (*RelayServer, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	wsAddress := fmt.Sprintf("ws://%s:%d/ws/relay", localAdvertiseHost(), port)
+	scheme := "ws"
+	if tlsCert != "" {
+		scheme = "wss"
+	}
+	wsAddress := fmt.Sprintf("%s://%s:%d/ws/relay", scheme, localAdvertiseHost(), port)
 
 	srv := &RelayServer{
 		peerID:           peerID,
 		port:             port,
 		ledgerBaseURL:    strings.TrimRight(ledgerBaseURL, "/"),
 		wsAddress:        wsAddress,
+		tlsCert:          tlsCert,
+		tlsKey:           tlsKey,
 		httpClient:       &http.Client{Timeout: 10 * time.Second},
 		connectedDBs:     make(map[string]*DBConn),
 		connectedRelays:  make(map[string]*RelayConn),
@@ -199,8 +213,15 @@ func (s *RelayServer) Start() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("http server error: %v", err)
+		var serveErr error
+		if s.tlsCert != "" {
+			log.Printf("TLS enabled cert=%s", s.tlsCert)
+			serveErr = s.httpServer.ListenAndServeTLS(s.tlsCert, s.tlsKey)
+		} else {
+			serveErr = s.httpServer.ListenAndServe()
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			log.Printf("http server error: %v", serveErr)
 			s.cancel()
 		}
 	}()
