@@ -253,40 +253,50 @@ func (cp *ChatPeer) Start(ctx context.Context) error {
 
 	// Start a goroutine to periodically refresh reservations
 	go cp.refreshReservations(ctx, *relayInfo)
-	go cp.keepAlive(ctx, relayInfo.ID)
+	go cp.keepAlive(ctx, *relayInfo)
 
+	err = cp.registerWithRelay(relayInfo.ID)
+	if err != nil {
+		fmt.Println("[DEBUG] Initial register with relay failed:", err)
+	}
+
+	return nil
+}
+
+func (cp *ChatPeer) registerWithRelay(relayID peer.ID) error {
 	var reqSent reqFormat
 	reqSent.Type = "register"
-	reqSent.PeerID = cp.Host.ID().String() // now sending the the peerID in the req to registeer in the relay
-	//reqSent.PubIP = OwnPubIP // have too use a stun server to get public ip first and then send register command
+	reqSent.PeerID = cp.Host.ID().String()
 	PeerID = reqSent.PeerID
-	fmt.Println(reqSent.PeerID)
-	stream, err := cp.Host.NewStream(context.Background(), relayInfo.ID, ChatProtocol)
 
+	stream, err := cp.Host.NewStream(context.Background(), relayID, ChatProtocol)
 	if err != nil {
-		fmt.Println("[DEBUG]Error Opening stream to relay")
+		return fmt.Errorf("error opening register stream: %w", err)
 	}
-	fmt.Println("[DEBUG]Opened atream to relay successsfully")
+	defer stream.Close()
+
 	reqJson, err := json.Marshal(reqSent)
 	if err != nil {
-		fmt.Println("[DEBUG]Error marshalling the req to be sent")
+		return fmt.Errorf("error marshalling register req: %w", err)
 	}
 	stream.Write([]byte(reqJson))
-
-	time.Sleep(1 * time.Second)
-
-	stream.Close()
+	time.Sleep(500 * time.Millisecond)
+	fmt.Println("[DEBUG] Registered peer ID with relay successfully:", reqSent.PeerID)
 	return nil
 }
 
 func (cp *ChatPeer) refreshReservations(ctx context.Context, relayInfo peer.AddrInfo) {
-	ticker := time.NewTicker(5 * time.Minute) // Refresh every 5 minutes
+	ticker := time.NewTicker(4 * time.Minute) // Refresh every 4 minutes (slightly faster than 5m)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			fmt.Println("[DEBUG] Refreshing relay reservation...")
+			// Ensuring we are registered just in case. It's idempotent and cheap.
+			// It handles the edge case where an implicit reconnection didn't trigger registration.
+			cp.registerWithRelay(relayInfo.ID)
+
 			if reservation, err := client.Reserve(ctx, cp.Host, relayInfo); err != nil {
 				fmt.Printf("[DEBUG] Failed to refresh reservation: %v\n", err)
 			} else {
@@ -298,22 +308,45 @@ func (cp *ChatPeer) refreshReservations(ctx context.Context, relayInfo peer.Addr
 	}
 }
 
-func (cp *ChatPeer) keepAlive(ctx context.Context, relayID peer.ID) {
+func (cp *ChatPeer) keepAlive(ctx context.Context, relayInfo peer.AddrInfo) {
 	ticker := time.NewTicker(40 * time.Second) // Ping every 40 seconds to prevent idle timeout
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
+			wasConnected := cp.Host.Network().Connectedness(relayInfo.ID) == network.Connected
+
 			pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			ch := ping.Ping(pingCtx, cp.Host, relayID)
+			ch := ping.Ping(pingCtx, cp.Host, relayInfo.ID)
 			res := <-ch
 			cancel()
 			if res.Error != nil {
 				fmt.Println("[DEBUG] Relay ping failed:", res.Error)
-				// Trigger a reconnect if the connection dropped purely at the transport layer
-				relInfo := cp.Host.Peerstore().PeerInfo(relayID)
-				cp.Host.Connect(ctx, relInfo)
+				// Close the existing, broken connection aggressively to force a new dial
+				cp.Host.Network().ClosePeer(relayInfo.ID)
+
+				for i := 0; i < 3; i++ {
+					connCtx, connCancel := context.WithTimeout(ctx, 10*time.Second)
+					err := cp.Host.Connect(connCtx, relayInfo)
+					connCancel()
+					if err == nil {
+						fmt.Println("[DEBUG] Reconnected transport to relay!")
+						cp.registerWithRelay(relayInfo.ID)
+						client.Reserve(ctx, cp.Host, relayInfo)
+						break
+					}
+					fmt.Println("[DEBUG] Failed to reconnect to relay, retrying in 2s...")
+					time.Sleep(2 * time.Second)
+				}
+			} else {
+				// Ping succeeded! But what if the peer wasn't connected at the beginning of this tick?
+				// This means ping.Ping() automatically dialed and implicitly reconnected!
+				if !wasConnected {
+					fmt.Println("[DEBUG] Implicitly reconnected transport to relay!")
+					cp.registerWithRelay(relayInfo.ID)
+					client.Reserve(ctx, cp.Host, relayInfo)
+				}
 			}
 		case <-ctx.Done():
 			return
