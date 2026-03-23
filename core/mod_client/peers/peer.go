@@ -29,6 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/libr-forum/Libr/core/mod_client/logger"
 	"github.com/multiformats/go-multiaddr"
 
@@ -241,6 +242,7 @@ func (cp *ChatPeer) Start(ctx context.Context) error {
 
 	// Start a goroutine to periodically refresh reservations
 	go cp.refreshReservations(ctx, *relayInfo)
+	go cp.keepAlive(ctx, relayInfo.ID)
 
 	var reqSent reqFormat
 	reqSent.Type = "register"
@@ -278,6 +280,29 @@ func (cp *ChatPeer) refreshReservations(ctx context.Context, relayInfo peer.Addr
 				fmt.Printf("[DEBUG] Failed to refresh reservation: %v\n", err)
 			} else {
 				fmt.Printf("[DEBUG] Reservation refreshed! Expiry: %v\n", reservation.Expiration)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (cp *ChatPeer) keepAlive(ctx context.Context, relayID peer.ID) {
+	ticker := time.NewTicker(40 * time.Second) // Ping every 40 seconds to prevent idle timeout
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			ch := ping.Ping(pingCtx, cp.Host, relayID)
+			res := <-ch
+			cancel()
+			if res.Error != nil {
+				fmt.Println("[DEBUG] Relay ping failed:", res.Error)
+				// Trigger a reconnect if the connection dropped purely at the transport layer
+				relInfo := cp.Host.Peerstore().PeerInfo(relayID)
+				cp.Host.Connect(ctx, relInfo)
 			}
 		case <-ctx.Done():
 			return
