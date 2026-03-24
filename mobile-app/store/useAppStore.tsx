@@ -104,11 +104,12 @@ interface StoreContextValue {
   removeMessage: (sign: string) => void;
   addMessage: (msg: RetMsgCert) => void;
   setModerator: (isMod: boolean) => void;
-  addReportedSign: (sign: string) => void;
+  addReportedSign: (sign: string, cert?: RetMsgCert) => void;
 }
 
 const StoreContext = createContext<StoreContextValue | undefined>(undefined);
 const REPORTED_SIGNS_KEY = '@libr_reported_signs';
+const REPORTED_MESSAGES_KEY = '@libr_reported_messages';
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -157,9 +158,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const removeMessage = useCallback((sign: string) => dispatch({ type: 'REMOVE_MESSAGE', payload: sign }), []);
   const addMessage = useCallback((msg: RetMsgCert) => dispatch({ type: 'ADD_MESSAGE', payload: msg }), []);
   const setModerator = useCallback((isMod: boolean) => dispatch({ type: 'SET_MODERATOR', payload: isMod }), []);
-  const addReportedSign = useCallback((sign: string) => {
+  const addReportedSign = useCallback((sign: string, cert?: RetMsgCert) => {
     dispatch({ type: 'ADD_REPORTED_SIGN', payload: sign });
-    // Persist to AsyncStorage
+    // Persist sign to AsyncStorage
     AsyncStorage.getItem(REPORTED_SIGNS_KEY).then((data: string | null) => {
       const arr = data ? JSON.parse(data) : [];
       if (!arr.includes(sign)) {
@@ -167,6 +168,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         AsyncStorage.setItem(REPORTED_SIGNS_KEY, JSON.stringify(arr));
       }
     }).catch(() => { });
+    // Also persist the full message cert for offline display
+    if (cert) {
+      AsyncStorage.getItem(REPORTED_MESSAGES_KEY).then((data: string | null) => {
+        const cache: Record<string, RetMsgCert> = data ? JSON.parse(data) : {};
+        cache[sign] = cert;
+        AsyncStorage.setItem(REPORTED_MESSAGES_KEY, JSON.stringify(cache));
+      }).catch(() => { });
+    }
   }, []);
 
   return (

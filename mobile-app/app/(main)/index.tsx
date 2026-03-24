@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import LibrCore, { LibrCoreEvents, RetMsgCert, MsgCert } from '@/modules/LibrCore';
 import { useAppStore } from '@/store/useAppStore';
 import { useSidebar } from './_layout';
-import { Menu, Plus, Check, Clock, Shield, Trash2, Flag, X } from 'lucide-react-native';
+import { Menu, Plus, Check, Clock, Shield, Trash2, Flag, X, AlertTriangle } from 'lucide-react-native';
 import { ConnectingScreen } from '@/components/ConnectingScreen';
 import { AnimatedHamburger } from '@/components/AnimatedHamburger';
 
@@ -366,6 +366,81 @@ function ReportReasonModal({
   );
 }
 
+// ── ActionSuccessModal ────────────────────────────────────────────────────────
+
+function ActionSuccessModal({
+  visible,
+  title,
+  message,
+  onClose
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onClose}>
+        <View style={styles.successModalContainer} onStartShouldSetResponder={() => true}>
+          <View style={styles.successIconWrap}>
+            <Check size={32} color={C.green} />
+          </View>
+          <Text style={styles.successTitle}>{title}</Text>
+          <Text style={styles.successMessage}>{message}</Text>
+          <TouchableOpacity style={styles.successBtn} onPress={onClose}>
+            <Text style={styles.successBtnText}>Dismiss</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+// ── ActionConfirmModal ────────────────────────────────────────────────────────
+
+function ActionConfirmModal({
+  visible,
+  title,
+  message,
+  confirmText,
+  cancelText,
+  isDestructive,
+  onConfirm,
+  onCancel
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  confirmText: string;
+  cancelText: string;
+  isDestructive: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onCancel}>
+        <View style={styles.successModalContainer} onStartShouldSetResponder={() => true}>
+          <View style={[styles.successIconWrap, isDestructive && { backgroundColor: C.red + '20' }]}>
+            {isDestructive ? <AlertTriangle size={32} color={C.red} /> : <AlertTriangle size={32} color={C.amber} />}
+          </View>
+          <Text style={styles.successTitle}>{title}</Text>
+          <Text style={styles.successMessage}>{message}</Text>
+          <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+            <TouchableOpacity style={[styles.successBtn, { flex: 1, backgroundColor: 'transparent', borderWidth: 1, borderColor: C.border }]} onPress={onCancel}>
+              <Text style={[styles.successBtnText, { color: C.text }]}>{cancelText}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.successBtn, { flex: 1, backgroundColor: isDestructive ? C.red : C.teal }]} onPress={onConfirm}>
+              <Text style={styles.successBtnText}>{confirmText}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
@@ -379,6 +454,8 @@ export default function ChatScreen() {
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportMessageCert, setReportMessageCert] = useState<RetMsgCert | null>(null);
+  const [successModalConfig, setSuccessModalConfig] = useState({ visible: false, title: '', message: '' });
+  const [confirmModalConfig, setConfirmModalConfig] = useState({ visible: false, title: '', message: '', onConfirm: () => {}, isDestructive: true });
   const fetchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fabScale = useRef(new Animated.Value(1)).current;
   const insets = useSafeAreaInsets();
@@ -558,8 +635,8 @@ export default function ChatScreen() {
       };
       const result: string = await (LibrCore as any).reportMessage(JSON.stringify(msgCert), reason);
       if (result === 'ok') {
-        addReportedSign(reportMessageCert.sign);
-        Alert.alert('Reported', 'Message has been flagged for review.');
+        addReportedSign(reportMessageCert.sign, reportMessageCert);
+        setSuccessModalConfig({ visible: true, title: 'Reported', message: 'Message has been flagged for review.' });
       } else {
         Alert.alert('Report failed', result);
       }
@@ -574,31 +651,33 @@ export default function ChatScreen() {
       Alert.alert('Not supported', 'Please rebuild the Go bridge.');
       return;
     }
-    Alert.alert('Delete message', 'Are you sure? this will send a delete request to the network.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          try {
-            const msgCert: MsgCert = {
-              public_key: cert.public_key,
-              msg: cert.msg,
-              mod_certs: cert.mod_certs,
-              sign: cert.sign,
-            };
-            const result: string = await (LibrCore as any).deleteMessage(JSON.stringify(msgCert));
-            if (result === 'ok') {
-              removeMessage(cert.sign);
-              setDetailsVisible(false);
-              Alert.alert('Deleted', 'The message has been removed from the network.');
-            } else {
-              Alert.alert('Delete failed', result);
-            }
-          } catch (err: any) {
-            Alert.alert('Error', err?.message ?? 'Unknown error');
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Delete message',
+      message: 'Are you sure? This will send a delete request to the network.',
+      isDestructive: true,
+      onConfirm: async () => {
+        setConfirmModalConfig(prev => ({ ...prev, visible: false }));
+        try {
+          const msgCert: MsgCert = {
+            public_key: cert.public_key,
+            msg: cert.msg,
+            mod_certs: cert.mod_certs,
+            sign: cert.sign,
+          };
+          const result: string = await (LibrCore as any).deleteMessage(JSON.stringify(msgCert));
+          if (result === 'ok') {
+            removeMessage(cert.sign);
+            setDetailsVisible(false);
+            setSuccessModalConfig({ visible: true, title: 'Deleted', message: 'The message has been removed from the network.' });
+          } else {
+            Alert.alert('Delete failed', result);
           }
+        } catch (err: any) {
+          Alert.alert('Error', err?.message ?? 'Unknown error');
         }
-      },
-    ]);
+      }
+    });
   }, [doFetch]);
 
   // ── Status helpers ─────────────────────────────────────────────────────────
@@ -715,6 +794,24 @@ export default function ChatScreen() {
         visible={reportModalVisible}
         onClose={() => setReportModalVisible(false)}
         onSubmit={submitReport}
+      />
+
+      <ActionSuccessModal
+        visible={successModalConfig.visible}
+        title={successModalConfig.title}
+        message={successModalConfig.message}
+        onClose={() => setSuccessModalConfig(prev => ({ ...prev, visible: false }))}
+      />
+
+      <ActionConfirmModal
+        visible={confirmModalConfig.visible}
+        title={confirmModalConfig.title}
+        message={confirmModalConfig.message}
+        confirmText="Delete"
+        cancelText="Cancel"
+        isDestructive={confirmModalConfig.isDestructive}
+        onConfirm={confirmModalConfig.onConfirm}
+        onCancel={() => setConfirmModalConfig(prev => ({ ...prev, visible: false }))}
       />
 
       {/* Floating Action Button */}
@@ -1079,6 +1176,57 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
+  },
+  successModalContainer: {
+    width: 280,
+    backgroundColor: C.card,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
+    elevation: 20,
+  },
+  successIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: C.green + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: C.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  successMessage: {
+    fontSize: 15,
+    color: C.muted,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  successBtn: {
+    backgroundColor: C.teal,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
+  successBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center'
   }
 });
 

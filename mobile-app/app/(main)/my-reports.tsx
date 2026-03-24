@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, StatusBar } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, StatusBar, Modal } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Flag, CheckCircle, Clock } from 'lucide-react-native';
+import { ArrowLeft, Flag, CheckCircle, Clock, XCircle, Bell } from 'lucide-react-native';
 import { useAppStore } from '@/store/useAppStore';
 import LibrCore, { RetMsgCert } from '@/modules/LibrCore';
 import { Image } from 'expo-image';
@@ -19,6 +20,39 @@ const C = {
     amber: '#ffb300',
 };
 
+// Styled in-app notification banner
+function NotificationBanner({ visible, type, message, onDismiss }: { visible: boolean; type: 'approved' | 'rejected'; message: string; onDismiss: () => void }) {
+    if (!visible) return null;
+    const isApproved = type === 'approved';
+    return (
+        <Modal visible={visible} transparent animationType="slide" onRequestClose={onDismiss}>
+            <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onDismiss}>
+                <View style={{
+                    position: 'absolute', top: 60, left: 16, right: 16,
+                    backgroundColor: C.card, borderRadius: 16, padding: 16,
+                    borderWidth: 1, borderColor: isApproved ? C.green + '40' : C.red + '40',
+                    flexDirection: 'row', alignItems: 'center', gap: 12,
+                    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10,
+                }}>
+                    <View style={{
+                        width: 40, height: 40, borderRadius: 20,
+                        backgroundColor: isApproved ? C.green + '20' : C.red + '20',
+                        alignItems: 'center', justifyContent: 'center',
+                    }}>
+                        {isApproved ? <CheckCircle size={20} color={C.green} /> : <XCircle size={20} color={C.red} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={{ color: isApproved ? C.green : C.red, fontWeight: '700', fontSize: 15 }}>
+                            {isApproved ? 'Report Approved' : 'Report Rejected'}
+                        </Text>
+                        <Text style={{ color: C.muted, fontSize: 13, marginTop: 2 }}>{message}</Text>
+                    </View>
+                </View>
+            </TouchableOpacity>
+        </Modal>
+    );
+}
+
 export default function MyReportsScreen() {
     const router = useRouter();
     const { state } = useAppStore();
@@ -26,7 +60,44 @@ export default function MyReportsScreen() {
     const [reportedMessages, setReportedMessages] = useState<RetMsgCert[]>([]);
     const [pendingStatus, setPendingStatus] = useState<Record<string, { total: number, approved: number, rejected: number }>>({});
     const [loading, setLoading] = useState(true);
+    const [notification, setNotification] = useState<{ visible: boolean; type: 'approved' | 'rejected'; message: string }>({ visible: false, type: 'approved', message: '' });
+    const [dismissedSigns, setDismissedSigns] = useState<Set<string>>(new Set());
+    // Track finalized reports: sign -> 'approved' | 'rejected'
+    const [resolvedSigns, setResolvedSigns] = useState<Record<string, 'approved' | 'rejected'>>({});
 
+    // Cache reported messages so they persist even after deletion from feed
+    const cachedMessagesRef = useRef<Map<string, RetMsgCert>>(new Map());
+    const prevStatusRef = useRef<Record<string, { total: number, approved: number, rejected: number }>>({});
+    const autoDismissTimers = useRef<Set<string>>(new Set());
+
+    // Show a styled notification that auto-dismisses after 5 seconds
+    const showNotification = useCallback((type: 'approved' | 'rejected', message: string) => {
+        setNotification({ visible: true, type, message });
+        setTimeout(() => setNotification(prev => ({ ...prev, visible: false })), 5000);
+    }, []);
+
+    // Dismiss a completed report — remove from state + AsyncStorage
+    const dismissReport = useCallback((sign: string) => {
+        setDismissedSigns(prev => new Set(prev).add(sign));
+        setReportedMessages(prev => prev.filter(m => m.sign !== sign));
+        // Clean from AsyncStorage
+        AsyncStorage.getItem('@libr_reported_signs').then((data: string | null) => {
+            if (data) {
+                const arr: string[] = JSON.parse(data).filter((s: string) => s !== sign);
+                AsyncStorage.setItem('@libr_reported_signs', JSON.stringify(arr));
+            }
+        }).catch(() => {});
+        AsyncStorage.getItem('@libr_reported_messages').then((data: string | null) => {
+            if (data) {
+                const cache = JSON.parse(data);
+                delete cache[sign];
+                AsyncStorage.setItem('@libr_reported_messages', JSON.stringify(cache));
+            }
+        }).catch(() => {});
+        cachedMessagesRef.current.delete(sign);
+    }, []);
+
+    // Fetch messages and cache them
     useEffect(() => {
         let cancelled = false;
 
@@ -41,27 +112,34 @@ export default function MyReportsScreen() {
 
             setLoading(true);
             try {
-                const results: RetMsgCert[] = [];
-                // We iterate through all fetched messages first as an optimization
-                // and keep track of ones we found.
-                const foundSigns = new Set<string>();
+                // Hydrate from AsyncStorage on first load
+                if (cachedMessagesRef.current.size === 0) {
+                    try {
+                        const stored = await AsyncStorage.getItem('@libr_reported_messages');
+                        if (stored) {
+                            const parsed: Record<string, RetMsgCert> = JSON.parse(stored);
+                            for (const [sign, cert] of Object.entries(parsed)) {
+                                cachedMessagesRef.current.set(sign, cert);
+                            }
+                        }
+                    } catch { }
+                }
 
+                // Update cache with any messages from the feed
                 for (const msg of state.messages) {
                     if (state.reportedSigns.has(msg.sign)) {
-                        results.push(msg);
-                        foundSigns.add(msg.sign);
+                        cachedMessagesRef.current.set(msg.sign, msg);
                     }
                 }
 
-                // For any reported signs not in the current feed, try to fetch them from DHT
-                const missingSigns = Array.from(state.reportedSigns).filter(s => !foundSigns.has(s));
+                // For any reported signs not in cache, try to fetch them from DHT
+                const missingSigns = Array.from(state.reportedSigns).filter(s => !cachedMessagesRef.current.has(s));
                 for (const sign of missingSigns) {
                     try {
-                        // Try to fetch individual message (assuming core supports it, otherwise it skips)
                         if (typeof (LibrCore as any).fetchMessageBySign === 'function') {
                             const raw = await (LibrCore as any).fetchMessageBySign(sign);
                             if (raw && !raw.startsWith('error:')) {
-                                results.push(JSON.parse(raw));
+                                cachedMessagesRef.current.set(sign, JSON.parse(raw));
                             }
                         }
                     } catch {
@@ -69,13 +147,25 @@ export default function MyReportsScreen() {
                     }
                 }
 
-                if (typeof (LibrCore as any).getPendingReports === 'function') {
-                    try {
-                        const rawStatus = await (LibrCore as any).getPendingReports();
-                        if (rawStatus && !rawStatus.startsWith('error:')) {
-                            setPendingStatus(JSON.parse(rawStatus));
-                        }
-                    } catch { }
+                // Detect resolved reports from live feed
+                const newResolved: Record<string, 'approved' | 'rejected'> = {};
+                for (const msg of state.messages) {
+                    if (state.reportedSigns.has(msg.sign) && msg.deleted === '1') {
+                        newResolved[msg.sign] = 'approved';
+                    }
+                }
+                if (Object.keys(newResolved).length > 0) {
+                    setResolvedSigns(prev => ({ ...prev, ...newResolved }));
+                }
+
+                // Build display list from cache — only show reports with actual content
+                const results: RetMsgCert[] = [];
+                for (const sign of Array.from(state.reportedSigns)) {
+                    if (dismissedSigns.has(sign)) continue;
+                    const cached = cachedMessagesRef.current.get(sign);
+                    if (cached) {
+                        results.push(cached);
+                    }
                 }
 
                 if (!cancelled) setReportedMessages(results);
@@ -88,17 +178,92 @@ export default function MyReportsScreen() {
 
         fetchDetails();
         return () => { cancelled = true; };
-    }, [state.reportedSigns, state.messages]);
+    }, [state.reportedSigns, state.messages, dismissedSigns]);
+
+    // Poll pendingStatus every 5 seconds (mirrors desktop's setInterval pattern)
+    useEffect(() => {
+        const pollStatus = async () => {
+            if (typeof (LibrCore as any).getPendingReports !== 'function') return;
+            try {
+                const rawStatus = await (LibrCore as any).getPendingReports();
+                if (rawStatus && !rawStatus.startsWith('error:')) {
+                    const newPending = JSON.parse(rawStatus);
+                    const prev = prevStatusRef.current;
+
+                    if (Object.keys(prev).length > 0) {
+                        // Detect signs that DISAPPEARED from pendingStatus = finalized by cron
+                        for (const sign in prev) {
+                            if (!state.reportedSigns.has(sign)) continue;
+                            if (!(sign in newPending)) {
+                                // Was pending before, gone now → finalized
+                                // INVERTED: rejected (status '0') = mods want message deleted = report approved
+                                const reportApproved = prev[sign].rejected > prev[sign].approved;
+                                const finalStatus = reportApproved ? 'approved' : 'rejected';
+                                setResolvedSigns(r => ({ ...r, [sign]: finalStatus as 'approved' | 'rejected' }));
+                                showNotification(finalStatus as 'approved' | 'rejected',
+                                    reportApproved
+                                        ? 'Your report was upheld — the message has been removed.'
+                                        : 'Your report was dismissed — the message will stay.'
+                                );
+                                // Auto-dismiss after 30 seconds
+                                if (!autoDismissTimers.current.has(sign)) {
+                                    autoDismissTimers.current.add(sign);
+                                    setTimeout(() => dismissReport(sign), 30_000);
+                                }
+                            }
+                        }
+
+                        // Detect quorum threshold crossings for still-pending items
+                        for (const sign in newPending) {
+                            if (!state.reportedSigns.has(sign)) continue;
+                            const pOld = prev[sign];
+                            const pNew = newPending[sign];
+                            if (pOld && pNew && pNew.total > 0) {
+                                const threshold = Math.floor(pNew.total / 2);
+                                // INVERTED: rejected (status '0') = in favor of report
+                                if (pOld.rejected <= threshold && pNew.rejected > threshold) {
+                                    setResolvedSigns(r => ({ ...r, [sign]: 'approved' }));
+                                    showNotification('approved', 'Your report was upheld — the message has been removed.');
+                                    if (!autoDismissTimers.current.has(sign)) {
+                                        autoDismissTimers.current.add(sign);
+                                        setTimeout(() => dismissReport(sign), 30_000);
+                                    }
+                                } else if (pOld.approved <= threshold && pNew.approved > threshold) {
+                                    setResolvedSigns(r => ({ ...r, [sign]: 'rejected' }));
+                                    showNotification('rejected', 'Your report was dismissed — the message will stay.');
+                                    if (!autoDismissTimers.current.has(sign)) {
+                                        autoDismissTimers.current.add(sign);
+                                        setTimeout(() => dismissReport(sign), 30_000);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    prevStatusRef.current = newPending;
+                    setPendingStatus(newPending);
+                }
+            } catch { }
+        };
+
+        pollStatus();
+        const intervalId = setInterval(pollStatus, 5000);
+        return () => clearInterval(intervalId);
+    }, [state.reportedSigns, showNotification, dismissReport]);
 
     const renderItem = ({ item }: { item: RetMsgCert }) => {
-        const isApproved = item.deleted === '1';
+        // Resolution detection: check resolvedSigns map first, then fallback to item.deleted
+        const resolvedStatus = resolvedSigns[item.sign];
+        const isApproved = resolvedStatus === 'approved' || item.deleted === '1';
+        const isRejected = resolvedStatus === 'rejected';
+        const pStatus = pendingStatus[item.sign];
+        const isActionTaken = isApproved || isRejected;
 
         // Extract plain content
         let rawContent = item.msg.content;
         const matchBody = rawContent.match(/<BODY>(.*?)<\/BODY>/s);
         if (matchBody) rawContent = matchBody[1].trim();
         const plainContent = rawContent.replace(/<\/?[^>]+(>|$)/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-
 
         // Extract images
         const imgSrcs: string[] = [];
@@ -110,18 +275,18 @@ export default function MyReportsScreen() {
 
         return (
             <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                    <Flag size={16} color={C.amber} />
-                    <Text style={styles.signText} numberOfLines={1} ellipsizeMode="middle">
-                        {item.sign.substring(0, 16)}...
-                    </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                    <Text style={styles.labelSpan}>Message: </Text>
+                    {plainContent ? (
+                        <Text style={styles.contentText} numberOfLines={10}>
+                            {plainContent}
+                        </Text>
+                    ) : (
+                        <Text style={[styles.contentText, { fontStyle: 'italic', color: C.muted }]}>
+                            [No text]
+                        </Text>
+                    )}
                 </View>
-
-                {plainContent ? (
-                    <Text style={styles.contentText} numberOfLines={2}>
-                        {plainContent}
-                    </Text>
-                ) : null}
 
                 {imgSrcs.length > 0 && (
                     <View style={styles.imageGallery}>
@@ -137,47 +302,79 @@ export default function MyReportsScreen() {
                 )}
 
                 <View style={styles.statusRow}>
-                    {isApproved ? (
+                    {isActionTaken ? (
                         <View style={styles.actionTakenContainer}>
                             <View style={styles.statusBadge}>
-                                <CheckCircle size={14} color={C.green} />
-                                <Text style={[styles.statusText, { color: C.green }]}>Action Taken</Text>
+                                {isApproved ? <CheckCircle size={14} color={C.green} /> : <XCircle size={14} color={C.red} />}
+                                <Text style={[styles.statusText, { color: isApproved ? C.green : C.red }]}>
+                                    {isApproved ? 'Report Approved' : 'Report Rejected'}
+                                </Text>
                             </View>
-                            <View style={styles.modDivider} />
-                            <View style={styles.modList}>
-                                <Text style={styles.modListTitle}>Handled by:</Text>
-                                <View style={styles.modAvatarsContainer}>
-                                    {Array.isArray(item.mod_certs) && item.mod_certs.map((mod: any, index: number) => {
-                                        if (!mod) return null;
-                                        const modKey = typeof mod === 'string' ? mod : mod.mod_pub_key;
-                                        if (!modKey) return null;
-                                        // Generate a pseudo-random color based on the key
-                                        const hue = modKey.length > 5 ? modKey.charCodeAt(5) * 10 % 360 : 0;
-                                        return (
-                                            <View key={`${item.sign}-mod-${index}`} style={[styles.modAvatar, { backgroundColor: `hsl(${hue}, 60%, 40%)`, zIndex: 10 - index }]}>
-                                                <Text style={styles.modAvatarText}>{modKey.substring(0, 1).toUpperCase()}</Text>
-                                            </View>
-                                        );
-                                    })}
-                                    <Text style={styles.modCountText}>
-                                        {Array.isArray(item.mod_certs) ? item.mod_certs.length : 0} Mod{Array.isArray(item.mod_certs) && item.mod_certs.length === 1 ? '' : 's'}
-                                    </Text>
+                            
+                            {pStatus && pStatus.total > 0 && (
+                                <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 10, paddingBottom: 8 }}>
+                                    <Text style={{ fontSize: 13, color: C.green, fontWeight: '600' }}>In favor: {pStatus.rejected}</Text>
+                                    <Text style={{ fontSize: 13, color: C.red, fontWeight: '600' }}>Against: {pStatus.approved}</Text>
+                                    <Text style={{ fontSize: 13, color: C.amber, fontWeight: '600' }}>Wait: {Math.max(0, pStatus.total - pStatus.approved - pStatus.rejected)}</Text>
                                 </View>
-                            </View>
+                            )}
+
+                            {(item.mod_certs && Array.isArray(item.mod_certs) && item.mod_certs.length > 0) && (
+                                <>
+                                    <View style={styles.modDivider} />
+                                    <View style={styles.modList}>
+                                        <Text style={styles.modListTitle}>Handled by:</Text>
+                                        <View style={styles.modAvatarsContainer}>
+                                            {item.mod_certs.map((mod: any, index: number) => {
+                                                if (!mod) return null;
+                                                const modKey = typeof mod === 'string' ? mod : mod.mod_pub_key;
+                                                if (!modKey) return null;
+                                                // Generate a pseudo-random color based on the key
+                                                const hue = modKey.length > 5 ? modKey.charCodeAt(5) * 10 % 360 : 0;
+                                                return (
+                                                    <View key={`${item.sign}-mod-${index}`} style={[styles.modAvatar, { backgroundColor: `hsl(${hue}, 60%, 40%)`, zIndex: 10 - index }]}>
+                                                        <Text style={styles.modAvatarText}>{modKey.substring(0, 1).toUpperCase()}</Text>
+                                                    </View>
+                                                );
+                                            })}
+                                            <Text style={styles.modCountText}>
+                                                {item.mod_certs.length} Mod{item.mod_certs.length === 1 ? '' : 's'}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </>
+                            )}
                         </View>
                     ) : (
-                        <View style={styles.statusBadge}>
-                            <Clock size={14} color={C.amber} />
-                            {pendingStatus[item.sign] && pendingStatus[item.sign].total > 0 ? (
-                                <Text style={[styles.statusText, { color: C.amber }]}>
-                                    Approved by {pendingStatus[item.sign].approved}/{Math.floor(pendingStatus[item.sign].total / 2) + 1} Mods
-                                </Text>
-                            ) : (
+                        <View style={{ gap: 8, paddingBottom: 8 }}>
+                            <View style={styles.statusBadge}>
+                                <Clock size={14} color={C.amber} />
                                 <Text style={[styles.statusText, { color: C.amber }]}>Under Review</Text>
+                            </View>
+                            {pStatus && pStatus.total > 0 && (
+                                <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 10 }}>
+                                    <Text style={{ fontSize: 13, color: C.green, fontWeight: '600' }}>In favor: {pStatus.rejected}</Text>
+                                    <Text style={{ fontSize: 13, color: C.red, fontWeight: '600' }}>Against: {pStatus.approved}</Text>
+                                    <Text style={{ fontSize: 13, color: C.amber, fontWeight: '600' }}>Wait: {Math.max(0, pStatus.total - pStatus.approved - pStatus.rejected)}</Text>
+                                </View>
                             )}
                         </View>
                     )}
                 </View>
+
+                {/* Dismiss button for completed reports */}
+                {isActionTaken && (
+                    <TouchableOpacity
+                        style={{
+                            marginTop: 12, alignSelf: 'flex-end',
+                            paddingHorizontal: 16, paddingVertical: 8,
+                            borderRadius: 10, backgroundColor: C.border + '60',
+                        }}
+                        onPress={() => dismissReport(item.sign)}
+                    >
+                        <Text style={{ color: C.muted, fontSize: 13, fontWeight: '600' }}>Dismiss</Text>
+                    </TouchableOpacity>
+                )}
             </View>
         );
     };
@@ -211,6 +408,13 @@ export default function MyReportsScreen() {
                     contentContainerStyle={styles.listContainer}
                 />
             )}
+
+            <NotificationBanner
+                visible={notification.visible}
+                type={notification.type}
+                message={notification.message}
+                onDismiss={() => setNotification(prev => ({ ...prev, visible: false }))}
+            />
         </SafeAreaView>
     );
 }
@@ -250,35 +454,39 @@ const styles = StyleSheet.create({
     },
     listContainer: {
         padding: 16,
-        gap: 12,
+        gap: 16,
     },
     card: {
         backgroundColor: C.card,
-        borderRadius: 12,
-        padding: 16,
+        borderRadius: 20,
+        padding: 20,
         borderWidth: 1,
         borderColor: C.border,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
     },
-    cardHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 8,
-    },
-    signText: {
+    labelSpan: {
         color: C.muted,
-        fontSize: 12,
-        flex: 1,
+        fontWeight: '700',
+        fontSize: 14,
+        marginRight: 4,
     },
     contentText: {
         color: C.text,
         fontSize: 14,
         lineHeight: 20,
-        marginBottom: 12,
+        flex: 1,
     },
     statusRow: {
         flexDirection: 'row',
-        justifyContent: 'flex-start',
+        justifyContent: 'space-between',
+        marginTop: 16,
+        paddingTop: 16,
+        borderTopWidth: 1,
+        borderTopColor: C.border + '50',
     },
     statusBadge: {
         flexDirection: 'row',
@@ -348,12 +556,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 8,
-        marginBottom: 12,
+        marginTop: 12,
     },
     reportImage: {
-        width: 80,
-        height: 80,
-        borderRadius: 8,
+        width: 100,
+        height: 100,
+        borderRadius: 12,
         backgroundColor: '#1a2235',
         borderWidth: 1,
         borderColor: C.border,

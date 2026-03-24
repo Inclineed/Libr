@@ -84,12 +84,12 @@ export default function CreateMessageModal() {
       router.replace('/');
     }
 
-    // 4. Background: Perform actual delivery
+    // 4. Background: Perform actual deliverya
     try {
       const raw: string = await LibrCore.sendTextMessage(fullContent);
       const result: SendResult = JSON.parse(raw);
 
-      if (result.status === 'sent' || result.status === 'pending_manual') {
+      if (result.status === 'sent' || result.status?.startsWith('sent:') || result.status === 'pending_manual') {
         if (result.status === 'pending_manual') {
           Alert.alert('Manual Approval', 'Message contains an image and has been sent for manual approval.');
         }

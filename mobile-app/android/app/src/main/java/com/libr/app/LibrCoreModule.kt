@@ -194,6 +194,13 @@ class LibrCoreModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
         }.start()
     }
 
+    @ReactMethod fun getPendingReports(promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("getPendingReports")?.toString() ?: "{}") }
+            catch (e: Exception) { promise.reject("ERR_GET_PENDING_REPORTS", e.message) }
+        }.start()
+    }
+
     @ReactMethod fun moderateMessage(msgCertJSON: String, action: String, promise: Promise) {
         Thread {
             try { promise.resolve(callBridgeString("moderateMessage", msgCertJSON, action)?.toString() ?: "error:not_built") }
