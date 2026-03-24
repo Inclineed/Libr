@@ -56,22 +56,31 @@ export const Menubar: React.FC = () => {
   React.useEffect(() => { pendingQueueRef.current = pendingQueue; }, [pendingQueue]);
 
   React.useEffect(() => {
-    // Seed from Go on every mount so the queue is current after a tab switch
-    GetPendingModerationStats().then((stats) => {
-      if (!stats?.items) return;
-      const queue: PendingModeration[] = stats.items.map((item: any) => ({
-        id: item.msg_sign,
-        ts: item.ts ?? 0,
-        content: item.content ?? '',
-        reason: item.reason ?? (item.is_image ? 'Image attached' : ''),
-        approved: item.approved,
-        rejected: item.rejected,
-        totalMods: item.approved + item.rejected + item.awaiting,
-        ackCount: item.approved + item.rejected,
-        awaitingMods: item.awaiting,
-      }));
-      setPendingQueue(queue);
-    }).catch(() => {});
+    // Reactive data source using polling to keep badges and the queue instantly in sync
+    const fetchStats = () => {
+      GetPendingModerationStats().then((stats) => {
+        if (!stats?.items) {
+          setPendingQueue([]);
+          return;
+        }
+        const queue: PendingModeration[] = stats.items.map((item: any) => ({
+          id: item.msg_sign,
+          ts: item.ts ?? 0,
+          content: item.content ?? '',
+          reason: item.reason ?? (item.is_image ? 'Image attached' : ''),
+          approved: item.approved,
+          rejected: item.rejected,
+          totalMods: item.approved + item.rejected + item.awaiting,
+          ackCount: item.approved + item.rejected,
+          awaitingMods: item.awaiting,
+        }));
+        setPendingQueue(queue);
+      }).catch(() => {});
+    };
+
+    fetchStats();
+    // Start polling interval
+    const intervalId = setInterval(fetchStats, 5000);
 
     // Live updates from cron
     const unsubCronStatus = EventsOn("cron_status_update", (queue: PendingModeration[]) => {
@@ -103,6 +112,7 @@ export const Menubar: React.FC = () => {
     });
 
     return () => {
+      clearInterval(intervalId);
       unsubCronStatus();
       unsubFinalized();
     };
@@ -135,20 +145,19 @@ export const Menubar: React.FC = () => {
   }, []);
 
   return (
-    <div className="w-full p-2 bg-card shadow-md items-center rounded-3xl h-full flex flex-col z-50">
+    <div className="relative w-full h-full flex flex-col z-50 pt-3 pb-0 pl-4 pr-0 gap-4 bg-transparent border-l border-border/5 overflow-hidden box-border">
       <ComingSoonDialog open={dialogOpen} onClose={() => {
         logger.info('[ComingSoonDialog] Closed.');
         setDialogOpen(false)
       }} />
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto flex flex-col w-full items-center">
-        <div className="text-left w-full mt-4 mb-4 pl-2 flex items-center">
-          <h3 className="text-sm font-semibold text-muted-foreground">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col w-full gap-4 pr-0 soft-scrollbar box-border">
+        {/* Moderators Floating Card */}
+        <div className="bg-card/70 backdrop-blur-xl shadow-lg border border-border/50 rounded-2xl p-4 w-full flex flex-col gap-3 relative overflow-hidden box-border">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80 mb-1 flex items-center gap-2">
             Moderators
           </h3>
-        </div>
-
-        <div className="flex flex-col gap-3 w-full pl-2 pb-4">
+          <div className="flex flex-col gap-2.5 w-full">
           {mods.map(({ key, alias, avatarSvg }) => (
             <div key={key} className="flex items-center justify-start space-x-3 py-1">
               {avatarSvg && avatarSvg !== "unknown" ? (
@@ -167,36 +176,38 @@ export const Menubar: React.FC = () => {
               <span className="text-sm font-medium text-foreground">{alias}</span>
             </div>
           ))}
+          </div>
         </div>
 
-        {/* Pending Moderation Queue */}
-        <button
-          onClick={() => setQueueOpen(prev => !prev)}
-          className="text-left w-full mt-4 mb-2 pl-2 pr-2 flex items-center hover:opacity-80 transition-opacity"
-        >
-          <div className="text-sm font-semibold text-muted-foreground flex items-center justify-between w-full">
-            <span className="flex items-center gap-1.5">
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform duration-200 ${queueOpen ? '' : '-rotate-90'}`}
-              />
-              Moderation Queue
-            </span>
-            {(pendingQueue.length + resolvedItems.length) > 0 && (
-              <span className="bg-libr-accent1 text-white text-xs px-2 py-0.5 rounded-full">
-                {pendingQueue.length + resolvedItems.length}
-              </span>
-            )}
-          </div>
-        </button>
+        {/* Moderation Queue Floating Card */}
+        <div className="bg-card/70 backdrop-blur-xl shadow-lg border border-border/50 rounded-2xl p-4 w-full flex flex-col gap-3 relative overflow-hidden box-border">
+          <button
+            onClick={() => setQueueOpen(prev => !prev)}
+            className="text-left w-full flex items-center hover:opacity-80 transition-opacity outline-none"
+          >
+            <div className="flex items-center justify-between w-full">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1.5">
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-muted-foreground/60 transition-transform duration-200 ${queueOpen ? '' : '-rotate-90'}`}
+                />
+                Moderation Queue
+              </h3>
+              {(pendingQueue.length + resolvedItems.length) > 0 && (
+                <span className="bg-libr-accent1/20 border border-libr-accent1/30 text-libr-accent1 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  {pendingQueue.length + resolvedItems.length}
+                </span>
+              )}
+            </div>
+          </button>
 
-        {queueOpen && (
-          <div className="flex flex-col gap-2 w-full pl-2 pr-2 pb-4">
+          {queueOpen && (
+            <div className="flex flex-col gap-2 w-full mt-2">
             {pendingQueue.length === 0 && resolvedItems.length === 0 ? (
               <p className="text-xs text-muted-foreground pl-1">No items pending.</p>
             ) : (
               <>
                 {/* Active pending items */}
-                {pendingQueue.map((item) => {
+                {pendingQueue.filter(item => !resolvedItems.some(r => r.id === item.id)).map((item) => {
                   const isOpen = expandedItem === item.id;
                   const isImage = item.reason === 'Image attached';
                   const isReport = !isImage && !!item.reason;
@@ -259,20 +270,36 @@ export const Menubar: React.FC = () => {
                             </div>
                           )}
 
-                          <div className="grid grid-cols-3 gap-1">
-                            <div className="flex flex-col items-center bg-green-500/10 rounded px-1.5 py-1.5 border border-green-500/20">
-                              <span className="text-green-400 font-bold text-sm leading-none">{item.approved}</span>
-                              <span className="text-muted-foreground text-[10px] mt-0.5">approved</span>
-                            </div>
-                            <div className="flex flex-col items-center bg-red-500/10 rounded px-1.5 py-1.5 border border-red-500/20">
-                              <span className="text-red-400 font-bold text-sm leading-none">{item.rejected}</span>
-                              <span className="text-muted-foreground text-[10px] mt-0.5">rejected</span>
-                            </div>
-                            <div className="flex flex-col items-center bg-yellow-500/10 rounded px-1.5 py-1.5 border border-yellow-500/20">
-                              <span className="text-yellow-400 font-bold text-sm leading-none">{item.awaitingMods}</span>
-                              <span className="text-muted-foreground text-[10px] mt-0.5">waiting</span>
-                            </div>
-                          </div>
+                          {(() => {
+                            const tot = item.approved + item.rejected + item.awaitingMods;
+                            const wA = tot === 0 ? 33.33 : (item.approved / tot) * 100;
+                            const wR = tot === 0 ? 33.33 : (item.rejected / tot) * 100;
+                            const wW = tot === 0 ? 33.33 : (item.awaitingMods / tot) * 100;
+                            return (
+                              <div className="flex flex-col mt-2 mb-1 w-full">
+                                {/* Floating numbers */}
+                                <div className="flex w-full gap-0.5 text-[10px] font-bold leading-none mb-1">
+                                  <div className={`flex justify-center transition-all duration-300 ${item.approved > 0 ? 'text-teal-400' : 'text-transparent'}`} style={{ width: `${wA}%` }}>{item.approved}</div>
+                                  <div className={`flex justify-center transition-all duration-300 ${item.rejected > 0 ? 'text-rose-500' : 'text-transparent'}`} style={{ width: `${wR}%` }}>{item.rejected}</div>
+                                  <div className={`flex justify-center transition-all duration-300 ${item.awaitingMods > 0 ? 'text-amber-400' : 'text-transparent'}`} style={{ width: `${wW}%` }}>{item.awaitingMods}</div>
+                                </div>
+                                {/* Bar */}
+                                <div className="flex w-full h-[3px] rounded-full bg-muted/10 gap-0.5 overflow-hidden">
+                                  <div className={`h-full transition-all duration-300 ${item.approved > 0 ? 'bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.8)]' : 'bg-muted/20'}`} style={{ width: `${wA}%` }} />
+                                  <div className={`h-full transition-all duration-300 ${item.rejected > 0 ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]' : 'bg-muted/20'}`} style={{ width: `${wR}%` }} />
+                                  <div className={`h-full transition-all duration-300 ${item.awaitingMods > 0 ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]' : 'bg-muted/20'}`} style={{ width: `${wW}%` }} />
+                                </div>
+                                {/* Micro-text */}
+                                <div className="flex items-center justify-center text-[10px] text-muted-foreground/50 font-medium lowercase tracking-wide mt-2">
+                                  <span className={item.approved > 0 ? 'text-teal-400/80 font-semibold' : ''}>{item.approved} approved</span>
+                                  <span className="mx-1.5 opacity-40">·</span>
+                                  <span className={item.rejected > 0 ? 'text-rose-500/80 font-semibold' : ''}>{item.rejected} rejected</span>
+                                  <span className="mx-1.5 opacity-40">·</span>
+                                  <span className={item.awaitingMods > 0 ? 'text-amber-400/80 font-semibold' : ''}>{item.awaitingMods} waiting</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           <div className="font-mono text-muted-foreground/50 text-[10px] break-all">
                             {item.id.substring(0, 24)}…
@@ -308,7 +335,7 @@ export const Menubar: React.FC = () => {
 
                   return (
                     <div
-                      key={item.id}
+                      key={`resolved-${item.id}`}
                       className={`rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}
                     >
                       {/* Header row */}
@@ -374,56 +401,53 @@ export const Menubar: React.FC = () => {
             )}
           </div>
         )}
+        </div>
       </div>
 
-      <div className="rounded-3xl m-2 bg-card w-[92%]">
+      {/* Embedded Options Section */}
+      <div className="flex flex-col w-full gap-1 pl-2 pr-0 pb-2 mt-auto border-t border-border/5 pt-4 relative z-0">
         <button
           onClick={() => {
-            logger.info('[Menubar] Feedback button clicked.');
+            logger.info('[Menubar] EULA link clicked.');
             BrowserOpenURL("https://libr-ashen.vercel.app/eula");
-
           }}
-          className='flex justify-start hover:bg-muted/50 libr-button w-[100%] items-center space-x-2'
+          className="flex items-center space-x-3 w-full px-3 py-2 text-muted-foreground/60 hover:text-foreground/90 hover:bg-foreground/5 rounded-xl transition-all text-sm font-medium outline-none"
         >
-          <Copyright className="aspect-square h-[40%]" />
-          <span className="mt-0.5">License & Agreement</span>
+          <Copyright className="w-4 h-4 text-muted-foreground/50" />
+          <span>License & Agreement</span>
         </button>
-      </div>
-      <div className="rounded-3xl m-2 bg-card w-[92%]">
+
         <button
           onClick={() => {
-            logger.info('[Menubar] Feedback button clicked.');
+            logger.info('[Menubar] Feedback link clicked.');
             BrowserOpenURL("https://forms.gle/Uchqc6Z49aoJwjvZ9");
-
           }}
-          className='flex justify-start hover:bg-muted/50 libr-button w-[100%] items-center space-x-2'
+          className="flex items-center space-x-3 w-full px-3 py-2 text-muted-foreground/60 hover:text-foreground/90 hover:bg-foreground/5 rounded-xl transition-all text-sm font-medium outline-none"
         >
-          <PencilLine className="aspect-square h-[40%]" />
-          <span className="mt-0.5">Feedback</span>
+          <PencilLine className="w-4 h-4 text-muted-foreground/50" />
+          <span>Feedback</span>
         </button>
-      </div>
-      <div className="rounded-3xl m-2 bg-card w-[92%]">
+
         <button
           onClick={() => {
             logger.info('[Menubar] Website link clicked.');
             BrowserOpenURL("https://libr-ashen.vercel.app/")
           }}
-          className="flex justify-start hover:bg-muted/50 libr-button w-[100%] items-center space-x-2"
+          className="flex items-center space-x-3 w-full px-3 py-2 text-muted-foreground/60 hover:text-foreground/90 hover:bg-foreground/5 rounded-xl transition-all text-sm font-medium outline-none"
         >
-          <Globe className="aspect-square h-[40%]" />
-          <span className="mt-0.5">Visit Website</span>
+          <Globe className="w-4 h-4 text-muted-foreground/50" />
+          <span>Visit Website</span>
         </button>
-      </div>
-      <div className="rounded-3xl m-2 bg-card w-[92%]">
+
         <button
           onClick={() => {
             logger.info('[Menubar] Open host database dialog.');
             setDialogOpen(true)
           }}
-          className="flex justify-start libr-button hover:bg-muted/50 w-[100%] items-center space-x-2"
+          className="flex items-center space-x-3 w-full px-3 py-2 text-muted-foreground/60 hover:text-foreground/90 hover:bg-foreground/5 rounded-xl transition-all text-sm font-medium outline-none"
         >
-          <Database className="aspect-square h-[40%]" />
-          <span className="mt-0.5">Host a database</span>
+          <Database className="w-4 h-4 text-muted-foreground/50" />
+          <span>Host a database</span>
         </button>
       </div>
     </div>

@@ -124,10 +124,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.3 }}
-        className="flex w-full mb-4"
+        className="flex w-full px-4 mb-3 box-border"
       >
-        <div className="w-[99%]">
-          <div className="relative rounded-3xl px-4 py-3 bg-card shadow-md border-b max-w-[80vw] break-words overflow-hidden">
+        <div className="w-full relative rounded-3xl px-5 py-4 bg-card shadow-md border border-border/20 break-words overflow-hidden box-border">
             {message.authorPublicKey === user.publicKey && (
               <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-libr-accent1 rounded-l-3xl" />
             )}
@@ -309,7 +308,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
               }
             `}
           </style>
-        </div>
       </motion.div>
       {showReportPopup && (
         <div className="fixed top-8 left-1/2 transform -translate-x-1/2 z-50 libr-card text-libr-secondary px-6 py-3 rounded-xl shadow-lg font-semibold text-center">

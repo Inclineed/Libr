@@ -415,6 +415,13 @@ func (a *App) FetchMessageReports() []models.MsgCert {
 func (a *App) ManualModerate(cert types.MsgCert, moderated int) {
 	modsign, _ := moddb.ReportModSign(&cert, strconv.Itoa(moderated), keycache.PrivKey, keycache.PubKey)
 	moddb.UpdateModerationStatus(cert.Sign, modsign, moderated)
+
+	// Append manual record to the modlog history!
+	msg := models.UserMsg{
+		Content:   cert.Msg.Content,
+		TimeStamp: cert.Msg.Ts,
+	}
+	service.AppendToModLog(msg, strconv.Itoa(moderated))
 }
 
 // IsModerationCronRunning exposes the cron status to the frontend via Wails.
@@ -446,6 +453,13 @@ func (a *App) ModerateBySign(sign string, moderated int) {
 		log.Printf("[ModerateBySign] update error: %v", err)
 	} else {
 		log.Printf("[ModerateBySign] sign=%s moderated=%d updated OK", sign, moderated)
+		
+		// Append manual record to the modlog history!
+		msg := models.UserMsg{
+			Content:   content,
+			TimeStamp: ts,
+		}
+		service.AppendToModLog(msg, strconv.Itoa(moderated))
 	}
 }
 

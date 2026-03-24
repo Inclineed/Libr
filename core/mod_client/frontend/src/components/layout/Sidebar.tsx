@@ -177,7 +177,7 @@ export const Sidebar: React.FC = () => {
                         : 'text-muted-foreground'
                       }`} />
                     <span className="font-medium text-foreground">
-                      Message Reports
+                      Manual Moderation
                     </span>
                   </div>
                 </motion.button>

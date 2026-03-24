@@ -128,9 +128,9 @@ export const ChatRoom: React.FC = () => {
         </div>
         <div className='flex h-[92%] flex-row'>
           {/* Messages Area */}
-          <div className="flex-1 min-h-0 h-screen flex flex-col relative">
+          <div className="flex-1 min-h-0 flex flex-col relative mb-4 rounded-3xl overflow-hidden">
             {/* Toolbar */}
-            <div className=" h-[8%] rounded-2xl pt-4 pl-0 flex items-center justify-between">
+            <div className=" h-[8%] pt-4 px-2 flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 {/* <button
                   onClick={() => setSortByNewest(!sortByNewest)}
@@ -223,7 +223,10 @@ export const ChatRoom: React.FC = () => {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto pt-4 pl-0 space-y-2 h-full max-h-[83%] max-w-[975x]" ref={messagesContainerRef}>
+            <div 
+              className="flex-1 overflow-y-auto mt-2 pl-0 space-y-2 min-h-0 rounded-3xl" 
+              ref={messagesContainerRef}
+            >
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <motion.div
