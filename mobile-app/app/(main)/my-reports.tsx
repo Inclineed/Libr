@@ -8,6 +8,10 @@ import { useAppStore } from '@/store/useAppStore';
 import LibrCore, { RetMsgCert } from '@/modules/LibrCore';
 import { Image } from 'expo-image';
 
+type QueueItem = RetMsgCert & {
+    placeholder?: boolean;
+};
+
 const C = {
     bg: '#0a0f1c',
     card: '#0f1625',
@@ -53,11 +57,11 @@ function NotificationBanner({ visible, type, message, onDismiss }: { visible: bo
     );
 }
 
-export default function MyReportsScreen() {
+export default function ModerationQueueScreen() {
     const router = useRouter();
     const { state } = useAppStore();
     const insets = useSafeAreaInsets();
-    const [reportedMessages, setReportedMessages] = useState<RetMsgCert[]>([]);
+    const [queueMessages, setQueueMessages] = useState<QueueItem[]>([]);
     const [pendingStatus, setPendingStatus] = useState<Record<string, { total: number, approved: number, rejected: number }>>({});
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<{ visible: boolean; type: 'approved' | 'rejected'; message: string }>({ visible: false, type: 'approved', message: '' });
@@ -79,7 +83,7 @@ export default function MyReportsScreen() {
     // Dismiss a completed report — remove from state + AsyncStorage
     const dismissReport = useCallback((sign: string) => {
         setDismissedSigns(prev => new Set(prev).add(sign));
-        setReportedMessages(prev => prev.filter(m => m.sign !== sign));
+        setQueueMessages(prev => prev.filter(m => m.sign !== sign));
         // Clean from AsyncStorage
         AsyncStorage.getItem('@libr_reported_signs').then((data: string | null) => {
             if (data) {
@@ -102,9 +106,10 @@ export default function MyReportsScreen() {
         let cancelled = false;
 
         const fetchDetails = async () => {
-            if (state.reportedSigns.size === 0) {
+            const pendingSigns = Object.keys(pendingStatus);
+            if (state.reportedSigns.size === 0 && pendingSigns.length === 0) {
                 if (!cancelled) {
-                    setReportedMessages([]);
+                    setQueueMessages([]);
                     setLoading(false);
                 }
                 return;
@@ -127,13 +132,14 @@ export default function MyReportsScreen() {
 
                 // Update cache with any messages from the feed
                 for (const msg of state.messages) {
-                    if (state.reportedSigns.has(msg.sign)) {
+                    if (state.reportedSigns.has(msg.sign) || pendingSigns.includes(msg.sign)) {
                         cachedMessagesRef.current.set(msg.sign, msg);
                     }
                 }
 
-                // For any reported signs not in cache, try to fetch them from DHT
-                const missingSigns = Array.from(state.reportedSigns).filter(s => !cachedMessagesRef.current.has(s));
+                // For any pending/reported signs not in cache, try to fetch them from DHT
+                const targetSigns = Array.from(new Set([...pendingSigns, ...Array.from(state.reportedSigns)]));
+                const missingSigns = targetSigns.filter(s => !cachedMessagesRef.current.has(s));
                 for (const sign of missingSigns) {
                     try {
                         if (typeof (LibrCore as any).fetchMessageBySign === 'function') {
@@ -158,17 +164,29 @@ export default function MyReportsScreen() {
                     setResolvedSigns(prev => ({ ...prev, ...newResolved }));
                 }
 
-                // Build display list from cache — only show reports with actual content
-                const results: RetMsgCert[] = [];
-                for (const sign of Array.from(state.reportedSigns)) {
+                // Build display list from the pending moderation queue.
+                const results: QueueItem[] = [];
+                for (const sign of pendingSigns) {
                     if (dismissedSigns.has(sign)) continue;
                     const cached = cachedMessagesRef.current.get(sign);
                     if (cached) {
                         results.push(cached);
+                    } else {
+                        results.push({
+                            public_key: '',
+                            sign,
+                            msg: {
+                                content: '',
+                                ts: 0,
+                            },
+                            mod_certs: [],
+                            deleted: '0',
+                            placeholder: true,
+                        });
                     }
                 }
 
-                if (!cancelled) setReportedMessages(results);
+                if (!cancelled) setQueueMessages(results);
             } catch (err) {
                 console.warn('Failed to fetch reported messages details:', err);
             } finally {
@@ -178,7 +196,7 @@ export default function MyReportsScreen() {
 
         fetchDetails();
         return () => { cancelled = true; };
-    }, [state.reportedSigns, state.messages, dismissedSigns]);
+    }, [state.reportedSigns, state.messages, dismissedSigns, pendingStatus]);
 
     // Poll pendingStatus every 5 seconds (mirrors desktop's setInterval pattern)
     useEffect(() => {
@@ -251,13 +269,9 @@ export default function MyReportsScreen() {
         return () => clearInterval(intervalId);
     }, [state.reportedSigns, showNotification, dismissReport]);
 
-    const renderItem = ({ item }: { item: RetMsgCert }) => {
+    const renderItem = ({ item }: { item: QueueItem }) => {
         // Resolution detection: check resolvedSigns map first, then fallback to item.deleted
-        const resolvedStatus = resolvedSigns[item.sign];
-        const isApproved = resolvedStatus === 'approved' || item.deleted === '1';
-        const isRejected = resolvedStatus === 'rejected';
         const pStatus = pendingStatus[item.sign];
-        const isActionTaken = isApproved || isRejected;
 
         // Extract plain content
         let rawContent = item.msg.content;
@@ -283,7 +297,7 @@ export default function MyReportsScreen() {
                         </Text>
                     ) : (
                         <Text style={[styles.contentText, { fontStyle: 'italic', color: C.muted }]}>
-                            [No text]
+                            {item.placeholder ? `Pending moderation item\n${item.sign.slice(0, 18)}...` : '[No text]'}
                         </Text>
                     )}
                 </View>
@@ -302,79 +316,22 @@ export default function MyReportsScreen() {
                 )}
 
                 <View style={styles.statusRow}>
-                    {isActionTaken ? (
-                        <View style={styles.actionTakenContainer}>
-                            <View style={styles.statusBadge}>
-                                {isApproved ? <CheckCircle size={14} color={C.green} /> : <XCircle size={14} color={C.red} />}
-                                <Text style={[styles.statusText, { color: isApproved ? C.green : C.red }]}>
-                                    {isApproved ? 'Report Approved' : 'Report Rejected'}
-                                </Text>
-                            </View>
-                            
-                            {pStatus && pStatus.total > 0 && (
-                                <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 10, paddingBottom: 8 }}>
-                                    <Text style={{ fontSize: 13, color: C.green, fontWeight: '600' }}>In favor: {pStatus.rejected}</Text>
-                                    <Text style={{ fontSize: 13, color: C.red, fontWeight: '600' }}>Against: {pStatus.approved}</Text>
-                                    <Text style={{ fontSize: 13, color: C.amber, fontWeight: '600' }}>Wait: {Math.max(0, pStatus.total - pStatus.approved - pStatus.rejected)}</Text>
-                                </View>
-                            )}
-
-                            {(item.mod_certs && Array.isArray(item.mod_certs) && item.mod_certs.length > 0) && (
-                                <>
-                                    <View style={styles.modDivider} />
-                                    <View style={styles.modList}>
-                                        <Text style={styles.modListTitle}>Handled by:</Text>
-                                        <View style={styles.modAvatarsContainer}>
-                                            {item.mod_certs.map((mod: any, index: number) => {
-                                                if (!mod) return null;
-                                                const modKey = typeof mod === 'string' ? mod : mod.mod_pub_key;
-                                                if (!modKey) return null;
-                                                // Generate a pseudo-random color based on the key
-                                                const hue = modKey.length > 5 ? modKey.charCodeAt(5) * 10 % 360 : 0;
-                                                return (
-                                                    <View key={`${item.sign}-mod-${index}`} style={[styles.modAvatar, { backgroundColor: `hsl(${hue}, 60%, 40%)`, zIndex: 10 - index }]}>
-                                                        <Text style={styles.modAvatarText}>{modKey.substring(0, 1).toUpperCase()}</Text>
-                                                    </View>
-                                                );
-                                            })}
-                                            <Text style={styles.modCountText}>
-                                                {item.mod_certs.length} Mod{item.mod_certs.length === 1 ? '' : 's'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                </>
-                            )}
+                    <View style={{ gap: 8, paddingBottom: 8 }}>
+                        <View style={styles.statusBadge}>
+                            <Clock size={14} color={C.amber} />
+                            <Text style={[styles.statusText, { color: C.amber }]}>
+                                {item.msg.content.includes('<img') ? 'Image Under Review' : 'Under Review'}
+                            </Text>
                         </View>
-                    ) : (
-                        <View style={{ gap: 8, paddingBottom: 8 }}>
-                            <View style={styles.statusBadge}>
-                                <Clock size={14} color={C.amber} />
-                                <Text style={[styles.statusText, { color: C.amber }]}>Under Review</Text>
+                        {pStatus && pStatus.total > 0 && (
+                            <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 10 }}>
+                                <Text style={{ fontSize: 13, color: C.green, fontWeight: '600' }}>Approved: {pStatus.approved}</Text>
+                                <Text style={{ fontSize: 13, color: C.red, fontWeight: '600' }}>Rejected: {pStatus.rejected}</Text>
+                                <Text style={{ fontSize: 13, color: C.amber, fontWeight: '600' }}>Waiting: {Math.max(0, pStatus.total - pStatus.approved - pStatus.rejected)}</Text>
                             </View>
-                            {pStatus && pStatus.total > 0 && (
-                                <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 10 }}>
-                                    <Text style={{ fontSize: 13, color: C.green, fontWeight: '600' }}>In favor: {pStatus.rejected}</Text>
-                                    <Text style={{ fontSize: 13, color: C.red, fontWeight: '600' }}>Against: {pStatus.approved}</Text>
-                                    <Text style={{ fontSize: 13, color: C.amber, fontWeight: '600' }}>Wait: {Math.max(0, pStatus.total - pStatus.approved - pStatus.rejected)}</Text>
-                                </View>
-                            )}
-                        </View>
-                    )}
+                        )}
+                    </View>
                 </View>
-
-                {/* Dismiss button for completed reports */}
-                {isActionTaken && (
-                    <TouchableOpacity
-                        style={{
-                            marginTop: 12, alignSelf: 'flex-end',
-                            paddingHorizontal: 16, paddingVertical: 8,
-                            borderRadius: 10, backgroundColor: C.border + '60',
-                        }}
-                        onPress={() => dismissReport(item.sign)}
-                    >
-                        <Text style={{ color: C.muted, fontSize: 13, fontWeight: '600' }}>Dismiss</Text>
-                    </TouchableOpacity>
-                )}
             </View>
         );
     };
@@ -387,7 +344,7 @@ export default function MyReportsScreen() {
                 <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
                     <ArrowLeft size={24} color={C.text} />
                 </TouchableOpacity>
-                <Text style={styles.title}>My Reports</Text>
+                <Text style={styles.title}>Moderation Queue</Text>
                 <View style={{ width: 40 }} />
             </View>
 
@@ -395,14 +352,14 @@ export default function MyReportsScreen() {
                 <View style={styles.centerContainer}>
                     <Text style={styles.emptyText}>Loading...</Text>
                 </View>
-            ) : reportedMessages.length === 0 ? (
+            ) : queueMessages.length === 0 ? (
                 <View style={styles.centerContainer}>
-                    <Flag size={48} color={C.border} style={{ marginBottom: 16 }} />
-                    <Text style={styles.emptyText}>You haven't reported any messages yet.</Text>
+                    <Bell size={48} color={C.border} style={{ marginBottom: 16 }} />
+                    <Text style={styles.emptyText}>No items pending moderation right now.</Text>
                 </View>
             ) : (
                 <FlatList
-                    data={reportedMessages}
+                    data={queueMessages}
                     keyExtractor={(item) => item.sign}
                     renderItem={renderItem}
                     contentContainerStyle={styles.listContainer}

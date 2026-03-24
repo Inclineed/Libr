@@ -42,6 +42,9 @@ func StartNode(relayMultiAddrList []string) error {
 }
 
 func GET(targetPeerID string, route string) ([]byte, error) { //"/ts=123&&id=123"
+	if Peer == nil || Peer.Host == nil {
+		return nil, errors.New("chat peer is not initialized")
+	}
 
 	reqparams := make(map[string]string)
 	parts := strings.Split(route, "/")
@@ -72,6 +75,9 @@ func GET(targetPeerID string, route string) ([]byte, error) { //"/ts=123&&id=123
 }
 
 func POST(targetPeerID string, route string, body []byte) ([]byte, error) {
+	if Peer == nil || Peer.Host == nil {
+		return nil, errors.New("chat peer is not initialized")
+	}
 
 	ctx := context.Background()
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

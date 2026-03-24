@@ -16,7 +16,7 @@ import { ModConfig } from './pages/ModConfig';
 import { Communities } from './pages/Communities';
 import { logger } from './logger/logger'
 
-import { Connect,GetRelayStatus,FetchPubKey,TitleBarTheme, GetRelayAddr } from '../wailsjs/go/main/App';
+import { Connect,GetRelayStatus,FetchPubKey,TitleBarTheme, GetRelayAddr, IsIncognitoEnabled } from '../wailsjs/go/main/App';
 import { EventsOn,Quit } from 'wailsjs/runtime/runtime';
 import {
   AlertDialog,
@@ -132,8 +132,10 @@ const App: React.FC = () => {
   const {
     isAuthenticated,
     setUser,
+    setIncognito,
     setCommunities,
     isDarkMode,
+    isIncognito,
     setCurrentCommunity,
     communities
   } = useAppStore();
@@ -144,6 +146,10 @@ const App: React.FC = () => {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDarkMode);
   }, [isDarkMode]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("incognito-theme", isIncognito);
+  }, [isIncognito]);
   
   useEffect(() => {
     TitleBarTheme(isDarkMode);
@@ -190,6 +196,7 @@ const App: React.FC = () => {
         const publicKey = await FetchPubKey();
         const user = await apiService.authenticate(publicKey);
         setUser(user);
+        setIncognito(await IsIncognitoEnabled());
 
         const fetchedCommunities = await apiService.getCommunities();
         setCommunities(fetchedCommunities);

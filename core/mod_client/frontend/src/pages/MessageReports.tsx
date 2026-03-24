@@ -104,8 +104,8 @@ export const MsgReports: React.FC = () => {
                       <MessageSquare className="w-6 h-6 text-libr-accent2" />
                     </div>
                     <div>
-                      <h1 className="text-2xl font-bold text-foreground">Manual Moderation</h1>
-                      <p className="text-muted-foreground">These messages require human action or have been reported by users.</p>
+                      <h1 className="text-2xl font-bold text-foreground">Message Reports</h1>
+                      <p className="text-muted-foreground">These messages have been reported by users and require moderation.</p>
                     </div>
                   </div>
                   <button
@@ -130,8 +130,8 @@ export const MsgReports: React.FC = () => {
                     <div className="w-16 h-16 bg-libr-accent2/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
                       <AlertTriangle className="w-8 h-8 text-libr-accent2" />
                     </div>
-                    <h3 className="text-lg font-medium text-foreground mb-2">Queue empty</h3>
-                    <p className="text-muted-foreground">No pending items for manual moderation</p>
+                    <h3 className="text-lg font-medium text-foreground mb-2">No reports found</h3>
+                    <p className="text-muted-foreground">No message reports available</p>
                   </motion.div>
                 ) : (
                   <div className="grid gap-3">
@@ -144,9 +144,9 @@ export const MsgReports: React.FC = () => {
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: index * 0.03 }}
-                          className="bg-card border border-border/20 shadow-sm rounded-2xl space-y-4 p-6"
+                          className="bg-card border border-border/20 rounded-3xl space-y-4 p-5 shadow-md"
                         >
-                          <div className="flex flex-col gap-3">
+                          <div className="rounded-2xl bg-background/30 border border-border/20 p-4">
                             {/* Title */}
                             {title && (
                               <div className="text-sm font-semibold text-foreground mb-1">{title}</div>

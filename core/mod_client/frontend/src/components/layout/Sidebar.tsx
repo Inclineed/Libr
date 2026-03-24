@@ -2,12 +2,13 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../../store/useAppStore';
 import { useSidebarStore } from '../../store/useSidebarStore';
-import { Shield, Cog, Hash, Plus, Settings, Moon, Sun, RefreshCcw, ChevronLeft, Eye, Menu, Wrench, User, AlertTriangle } from 'lucide-react';
+import { Shield, Cog, Hash, Plus, Settings, Moon, Sun, RefreshCcw, ChevronLeft, Eye, Menu, Wrench, User, AlertTriangle, Ghost } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { RegenKeys } from 'wailsjs/go/main/App';
+import { DisableIncognito, EnableIncognito, RegenKeys } from 'wailsjs/go/main/App';
 import logoSVG from '../assets/icon_transparent.svg';
 import { apiService } from '@/services/api';
 import { logger } from '../../logger/logger';
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -26,6 +27,8 @@ export const Sidebar: React.FC = () => {
     currentCommunity,
     setCurrentCommunity,
     setUser,
+    isIncognito,
+    setIncognito,
     user,
     isDarkMode,
     toggleTheme,
@@ -36,6 +39,7 @@ export const Sidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isReloadingCommunities, setIsReloadingCommunities] = React.useState(false);
+  const [isIncognitoLoading, setIsIncognitoLoading] = React.useState(false);
 
   const handleCommunitySelect = (community: any) => {
     logger.debug("Selected community", community);
@@ -68,6 +72,45 @@ export const Sidebar: React.FC = () => {
   const showViewAll = availableCommunities.length > 3;
   const [showResetConfirm, setShowResetConfirm] = React.useState(false);
   const [confirmAlias, setConfirmAlias] = React.useState('');
+
+  const handleIncognitoToggle = async () => {
+    setIsIncognitoLoading(true);
+    try {
+      const nextPubKey = isIncognito
+        ? await DisableIncognito()
+        : await EnableIncognito();
+
+      if (!nextPubKey) {
+        toast.error("Incognito unavailable", {
+          description: "Desktop identity switching is unavailable right now.",
+        });
+        return;
+      }
+
+      if (nextPubKey.startsWith('error:')) {
+        toast.error("Incognito failed", {
+          description: nextPubKey.replace(/^error:/, '').trim(),
+        });
+        return;
+      }
+
+      const nextUser = await apiService.authenticate(nextPubKey);
+      setUser(nextUser);
+      setIncognito(!isIncognito);
+      toast.message(!isIncognito ? "Incognito enabled" : "Incognito disabled", {
+        description: !isIncognito
+          ? "You are now using a temporary identity."
+          : "Your main identity has been restored.",
+      });
+    } catch (error) {
+      logger.error("Failed to toggle incognito", { error });
+      toast.error("Incognito failed", {
+        description: "We couldn't switch identities right now.",
+      });
+    } finally {
+      setIsIncognitoLoading(false);
+    }
+  };
 
   return (
     <div className='flex p-4 h-full w-full'>
@@ -177,7 +220,7 @@ export const Sidebar: React.FC = () => {
                         : 'text-muted-foreground'
                       }`} />
                     <span className="font-medium text-foreground">
-                      Manual Moderation
+                      Message Reports
                     </span>
                   </div>
                 </motion.button>
@@ -390,6 +433,28 @@ export const Sidebar: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              <button
+                onClick={handleIncognitoToggle}
+                disabled={isIncognitoLoading}
+                className={`mt-4 flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-colors ${
+                  isIncognito
+                    ? 'border-libr-accent2/60 bg-libr-accent2/20 text-libr-accent2'
+                    : 'border-border/60 bg-muted/20 text-foreground hover:bg-muted/40'
+                } ${isIncognitoLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+              >
+                <Ghost className={`mt-0.5 h-4 w-4 ${isIncognito ? 'text-libr-accent2' : 'text-muted-foreground'}`} />
+                <div className="flex-1">
+                  <div className="font-medium">
+                    {isIncognitoLoading ? 'Switching…' : isIncognito ? 'Incognito On' : 'Go Incognito'}
+                  </div>
+                  <div className={`mt-1 text-xs ${isIncognito ? 'text-libr-accent2/80' : 'text-muted-foreground'}`}>
+                    {isIncognito
+                      ? 'Using a temporary identity until you switch back.'
+                      : 'Temporarily switch to a stealth identity.'}
+                  </div>
+                </div>
+              </button>
 
               <AlertDialogFooter>
                 <div className='flex justify-between w-full'>

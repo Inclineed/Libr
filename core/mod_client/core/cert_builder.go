@@ -1,6 +1,7 @@
 package core
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,10 @@ import (
 )
 
 func CreateMsgCert(message string, ts int64, modcertList []types.ModCert) types.MsgCert {
-	_, privKey := keycache.PubKey, keycache.PrivKey
+	return CreateMsgCertWithPrivateKey(message, ts, modcertList, keycache.PrivKey)
+}
+
+func CreateMsgCertWithPrivateKey(message string, ts int64, modcertList []types.ModCert, privKey ed25519.PrivateKey) types.MsgCert {
 
 	sort.SliceStable(modcertList, func(i, j int) bool {
 		return modcertList[i].PublicKey < modcertList[j].PublicKey

@@ -2,28 +2,17 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 import 'react-native-reanimated';
 import React from 'react';
 import { useKeepAwake } from 'expo-keep-awake';
-import { Text, View, ScrollView } from 'react-native';
+import { Text, TextInput, ScrollView } from 'react-native';
 
-import { Colors } from '@/constants/theme';
-import { AppStoreProvider } from '@/store/useAppStore';
+import { Fonts, getAppColors } from '@/constants/theme';
+import { AppStoreProvider, useAppStore } from '@/store/useAppStore';
 
 export const unstable_settings = {
   anchor: '(main)',
-};
-
-const DarkNavyTheme = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    background: Colors.dark.background,
-    card: Colors.dark.primary,
-    text: Colors.dark.text,
-    border: Colors.dark.border,
-    primary: Colors.dark.tint,
-  },
 };
 
 class ErrorBoundary extends React.Component<
@@ -39,12 +28,13 @@ class ErrorBoundary extends React.Component<
   }
   render() {
     if (this.state.error) {
+      const colors = getAppColors(false);
       return (
-        <ScrollView style={{ flex: 1, padding: 24, paddingTop: 60, backgroundColor: Colors.dark.background }}>
+        <ScrollView style={{ flex: 1, padding: 24, paddingTop: 60, backgroundColor: colors.background }}>
           <Text style={{ color: '#ef4444', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
             App Error
           </Text>
-          <Text style={{ color: Colors.dark.text, fontSize: 13, fontFamily: 'monospace' }}>
+          <Text style={{ color: colors.text, fontSize: 13, fontFamily: Fonts.mono }}>
             {this.state.error.message}\n\n{this.state.error.stack}
           </Text>
         </ScrollView>
@@ -54,19 +44,55 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+function AppShell() {
+  const { state } = useAppStore();
+  const colors = getAppColors(state.isIncognito);
+
+  const theme = {
+    ...DarkTheme,
+    colors: {
+      ...DarkTheme.colors,
+      background: colors.background,
+      card: colors.primary,
+      text: colors.text,
+      border: colors.border,
+      primary: colors.tint,
+    },
+  };
+
+  return (
+    <ThemeProvider value={theme}>
+      <Stack>
+        <Stack.Screen name="(main)" options={{ headerShown: false }} />
+        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+      </Stack>
+      <StatusBar style="light" />
+    </ThemeProvider>
+  );
+}
+
 export default function RootLayout() {
   useKeepAwake();
+  const [fontsLoaded] = useFonts({
+    'Comfortaa-Regular': require('../assets/fonts/Comfortaa-Regular.ttf'),
+    'Comfortaa-SemiBold': require('../assets/fonts/Comfortaa-SemiBold.ttf'),
+    'Comfortaa-Bold': require('../assets/fonts/Comfortaa-Bold.ttf'),
+  });
+
+  (Text as any).defaultProps = (Text as any).defaultProps ?? {};
+  (Text as any).defaultProps.style = [{ fontFamily: Fonts.sans }];
+  (TextInput as any).defaultProps = (TextInput as any).defaultProps ?? {};
+  (TextInput as any).defaultProps.style = [{ fontFamily: Fonts.sans }];
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
         <AppStoreProvider>
-          <ThemeProvider value={DarkNavyTheme}>
-            <Stack>
-              <Stack.Screen name="(main)" options={{ headerShown: false }} />
-              <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-            </Stack>
-            <StatusBar style="light" />
-          </ThemeProvider>
+          <AppShell />
         </AppStoreProvider>
       </ErrorBoundary>
     </SafeAreaProvider>

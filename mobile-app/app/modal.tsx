@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { Stack, useRouter } from 'expo-router';
 import { X, Image as ImageIcon, Send, XCircle } from 'lucide-react-native';
 import LibrCore, { RetMsgCert, SendResult } from '@/modules/LibrCore';
-import { Colors } from '@/constants/theme';
+import { Colors, Fonts, getAppColors } from '@/constants/theme';
 import { useAppStore } from '@/store/useAppStore';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -12,6 +12,7 @@ import { Image } from 'expo-image';
 export default function CreateMessageModal() {
   const router = useRouter();
   const { state, addMessage, removeMessage } = useAppStore();
+  const colors = getAppColors(state.isIncognito);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [pendingImages, setPendingImages] = useState<string[]>([]); // base64 strings
@@ -119,31 +120,31 @@ export default function CreateMessageModal() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <Stack.Screen
         options={{
           headerShown: true,
           title: 'Spill Some Gossip',
-          headerStyle: { backgroundColor: Colors.dark.background },
-          headerTintColor: Colors.dark.text,
+          headerStyle: { backgroundColor: colors.background },
+          headerTintColor: colors.text,
           headerLeft: () => (
             <TouchableOpacity
               onPress={() => router.canGoBack() ? router.back() : router.replace('/')}
               style={{ padding: 8, marginLeft: -8 }}
             >
-              <X size={24} color={Colors.dark.icon} />
+              <X size={24} color={colors.icon} />
             </TouchableOpacity>
           )
         }}
       />
 
-      <View style={styles.content}>
+      <View style={[styles.content, { backgroundColor: colors.background }]}>
         <TextInput
-          style={styles.inputTitle}
+          style={[styles.inputTitle, { color: colors.text, backgroundColor: colors.primary, borderColor: colors.border }]}
           placeholder="Title (optional)"
-          placeholderTextColor={Colors.dark.icon}
+          placeholderTextColor={colors.icon}
           value={title}
           onChangeText={setTitle}
         />
@@ -151,9 +152,9 @@ export default function CreateMessageModal() {
         <View style={styles.divider} />
 
         <TextInput
-          style={styles.inputBody}
+          style={[styles.inputBody, { color: colors.text, backgroundColor: colors.primary, borderColor: colors.border }]}
           placeholder="What's the gossip?"
-          placeholderTextColor={Colors.dark.icon}
+          placeholderTextColor={colors.icon}
           multiline
           textAlignVertical="top"
           value={content}
@@ -170,7 +171,7 @@ export default function CreateMessageModal() {
                   style={styles.removeBtn}
                   onPress={() => removeImage(index)}
                 >
-                  <XCircle size={20} color={'#ef4444'} fill={Colors.dark.background} />
+                  <XCircle size={20} color={'#ef4444'} fill={colors.background} />
                 </TouchableOpacity>
               </View>
             ))}
@@ -178,21 +179,25 @@ export default function CreateMessageModal() {
         )}
       </View>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
         <TouchableOpacity
           style={styles.attachBtn}
           onPress={handlePickImage}
           disabled={isProcessing}
         >
           {isProcessing ? (
-            <View style={{ width: 24, height: 24, borderRadius: 12, borderTopColor: Colors.dark.tint, borderWidth: 2 }} />
+            <View style={{ width: 24, height: 24, borderRadius: 12, borderTopColor: colors.tint, borderWidth: 2 }} />
           ) : (
-            <ImageIcon size={24} color={Colors.dark.icon} />
+            <ImageIcon size={24} color={colors.icon} />
           )}
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.sendBtn, (!content.trim() && pendingImages.length === 0) && styles.sendBtnDisabled]}
+          style={[
+            styles.sendBtn,
+            { backgroundColor: colors.tint, shadowColor: colors.tint },
+            (!content.trim() && pendingImages.length === 0) && styles.sendBtnDisabled
+          ]}
           disabled={!content.trim() && pendingImages.length === 0}
           onPress={handleSend}
         >
@@ -214,20 +219,30 @@ const styles = StyleSheet.create({
   },
   inputTitle: {
     fontSize: 20,
-    fontWeight: '600',
+    fontFamily: Fonts.bold,
     color: Colors.dark.text,
+    backgroundColor: Colors.dark.primary,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
     paddingVertical: 12,
   },
   divider: {
-    height: 1,
-    backgroundColor: Colors.dark.border,
-    marginBottom: 12,
+    height: 12,
   },
   inputBody: {
     flex: 1,
     fontSize: 16,
+    fontFamily: Fonts.sans,
     color: Colors.dark.text,
     lineHeight: 24,
+    backgroundColor: Colors.dark.primary,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   footer: {
     flexDirection: 'row',

@@ -86,10 +86,11 @@ type RetMsgCert struct {
 }
 
 type PendingModeration struct {
-	MsgSign      string    `json:"msg_sign"`      // cert.Sign
-	MsgCert      MsgCert   `json:"msg_cert"`      // full original cert
-	PartialCerts []ModCert `json:"partial_certs"` // modcerts already received
-	AwaitingMods []string  `json:"awaiting_mods"` // public keys of mods yet to respond
-	AckCount     int       `json:"ack_count"`
-	CreatedAt    time.Time `json:"created_at"` // timestamp for cron retry
+	MsgSign          string    `json:"msg_sign"`      // cert.Sign
+	MsgCert          MsgCert   `json:"msg_cert"`      // full original cert
+	PartialCerts     []ModCert `json:"partial_certs"` // modcerts already received
+	AwaitingMods     []string  `json:"awaiting_mods"` // public keys of mods yet to respond
+	AckCount         int       `json:"ack_count"`
+	SignerIdentityID string    `json:"signer_identity_id,omitempty"` // identity used to finalize manual moderation
+	CreatedAt        time.Time `json:"created_at"`                   // timestamp for cron retry
 }

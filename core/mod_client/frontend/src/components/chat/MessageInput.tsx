@@ -19,6 +19,7 @@ import CodeBlock from '@tiptap/extension-code-block';
 import Placeholder from '@tiptap/extension-placeholder';
 import BulletList from '@tiptap/extension-bullet-list';
 import ListItem from '@tiptap/extension-list-item';
+import { toast } from 'sonner';
 
 import { logger } from '../../logger/logger';
 
@@ -79,7 +80,7 @@ export const MessageInput = forwardRef<HTMLDivElement, MessageInputProps>(
       if (!file.type.startsWith('image/')) return;
       // 1MB guard
       if (file.size > 1024 * 1024) {
-        alert('Image must be smaller than 1 MB.');
+        toast.error('Image must be smaller than 1 MB.');
         return;
       }
       const reader = new FileReader();
@@ -229,7 +230,9 @@ export const MessageInput = forwardRef<HTMLDivElement, MessageInputProps>(
         logger.info('[MessageInput] Message sent successfully', { messageContent: newMsg?.content });
 
         if (/<img\s+[^>]*src="data:image/i.test(formatted) && newMsg.status === 'pending') {
-          alert('Message contains an image and has been sent for manual approval.');
+          toast.message('Sent for manual approval', {
+            description: 'Your image post is now waiting for moderator review.',
+          });
         }
 
         setTitle('');

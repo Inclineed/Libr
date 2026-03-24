@@ -10,6 +10,14 @@ export function Delete(arg1) {
   return window['go']['main']['App']['Delete'](arg1);
 }
 
+export function DisableIncognito() {
+  return window['go']['main']['App']['DisableIncognito']();
+}
+
+export function EnableIncognito() {
+  return window['go']['main']['App']['EnableIncognito']();
+}
+
 export function FetchAll() {
   return window['go']['main']['App']['FetchAll']();
 }
@@ -52,6 +60,10 @@ export function GetRelayAddr() {
 
 export function GetRelayStatus() {
   return window['go']['main']['App']['GetRelayStatus']();
+}
+
+export function IsIncognitoEnabled() {
+  return window['go']['main']['App']['IsIncognitoEnabled']();
 }
 
 export function IsModerationCronRunning() {

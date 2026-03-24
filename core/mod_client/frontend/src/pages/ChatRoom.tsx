@@ -123,10 +123,10 @@ export const ChatRoom: React.FC = () => {
       <Sidebar />
       </div>
       <div className="flex flex-col w-full h-screen">
-        <div className='h-[8%] mt-4 mr-4 z-50'>
+        <div className='h-[7%] mt-4 mr-4 z-50'>
           <TopBar />
         </div>
-        <div className='flex h-[92%] flex-row'>
+        <div className='flex h-[93%] flex-row'>
           {/* Messages Area */}
           <div className="flex-1 min-h-0 flex flex-col relative mb-4 rounded-3xl overflow-hidden">
             {/* Toolbar */}

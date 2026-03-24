@@ -10,6 +10,8 @@ export type ConnectionStatus = 'idle' | 'initializing' | 'connected' | 'error';
 interface AppState {
   /** Ed25519 public key (base64) of this device. */
   publicKey: string;
+  /** Whether the active identity is a temporary incognito one. */
+  isIncognito: boolean;
   /** libp2p Peer ID for this device. */
   peerId: string;
   /** Current network connection/init status. */
@@ -28,6 +30,7 @@ interface AppState {
 
 type Action =
   | { type: 'SET_PUBLIC_KEY'; payload: string }
+  | { type: 'SET_INCOGNITO'; payload: boolean }
   | { type: 'SET_PEER_ID'; payload: string }
   | { type: 'SET_CONNECTION_STATUS'; payload: ConnectionStatus }
   | { type: 'SET_ERROR'; payload: string | null }
@@ -43,6 +46,7 @@ type Action =
 
 const initialState: AppState = {
   publicKey: '',
+  isIncognito: false,
   peerId: '',
   connectionStatus: 'idle',
   lastError: null,
@@ -55,6 +59,7 @@ const initialState: AppState = {
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_PUBLIC_KEY': return { ...state, publicKey: action.payload };
+    case 'SET_INCOGNITO': return { ...state, isIncognito: action.payload };
     case 'SET_PEER_ID': return { ...state, peerId: action.payload };
     case 'SET_CONNECTION_STATUS': return { ...state, connectionStatus: action.payload };
     case 'SET_ERROR': return { ...state, lastError: action.payload };
@@ -96,6 +101,7 @@ function reducer(state: AppState, action: Action): AppState {
 interface StoreContextValue {
   state: AppState;
   setPublicKey: (key: string) => void;
+  setIncognito: (value: boolean) => void;
   setPeerId: (id: string) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setError: (err: string | null) => void;
@@ -150,6 +156,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setPublicKey = useCallback((key: string) => dispatch({ type: 'SET_PUBLIC_KEY', payload: key }), []);
+  const setIncognito = useCallback((value: boolean) => dispatch({ type: 'SET_INCOGNITO', payload: value }), []);
   const setPeerId = useCallback((id: string) => dispatch({ type: 'SET_PEER_ID', payload: id }), []);
   const setConnectionStatus = useCallback((s: ConnectionStatus) => dispatch({ type: 'SET_CONNECTION_STATUS', payload: s }), []);
   const setError = useCallback((e: string | null) => dispatch({ type: 'SET_ERROR', payload: e }), []);
@@ -179,7 +186,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <StoreContext.Provider value={{ state, setPublicKey, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage, addMessage, setModerator, addReportedSign }}>
+    <StoreContext.Provider value={{ state, setPublicKey, setIncognito, setPeerId, setConnectionStatus, setError, setMessages, setFetching, removeMessage, addMessage, setModerator, addReportedSign }}>
       {children}
     </StoreContext.Provider>
   );

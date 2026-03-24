@@ -130,6 +130,21 @@ class LibrCoreModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
         catch (e: Exception) { promise.reject("ERR_REGEN_KEYS", e.message) }
     }
 
+    @ReactMethod fun enableIncognito(promise: Promise) {
+        try { promise.resolve(callBridgeString("enableIncognito")?.toString() ?: "") }
+        catch (e: Exception) { promise.reject("ERR_ENABLE_INCOGNITO", e.message) }
+    }
+
+    @ReactMethod fun disableIncognito(promise: Promise) {
+        try { promise.resolve(callBridgeString("disableIncognito")?.toString() ?: "") }
+        catch (e: Exception) { promise.reject("ERR_DISABLE_INCOGNITO", e.message) }
+    }
+
+    @ReactMethod fun isIncognitoEnabled(promise: Promise) {
+        try { promise.resolve((callBridgeString("isIncognitoEnabled") as? Boolean) ?: false) }
+        catch (e: Exception) { promise.reject("ERR_IS_INCOGNITO", e.message) }
+    }
+
     @ReactMethod fun getRelayAddresses(promise: Promise) {
         try { promise.resolve(callBridgeString("getRelayAddresses")?.toString() ?: "[]") }
         catch (e: Exception) { promise.reject("ERR_RELAY_ADDRS", e.message) }

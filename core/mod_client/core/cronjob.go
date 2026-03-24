@@ -10,6 +10,7 @@ import (
 	"time"
 
 	cache "github.com/libr-forum/Libr/core/mod_client/cache_handler"
+	"github.com/libr-forum/Libr/core/mod_client/identity"
 	"github.com/libr-forum/Libr/core/mod_client/logger"
 	"github.com/libr-forum/Libr/core/mod_client/types"
 	util "github.com/libr-forum/Libr/core/mod_client/util"
@@ -191,6 +192,7 @@ func RetryPendingModerations() {
 				runtime.EventsEmit(WailsCtx, "moderation_finalized", map[string]interface{}{"status": "rejected", "id": pending.MsgSign})
 			}
 			cache.DeletePendingModeration(pending.MsgSign)
+			maybeCleanupIdentity(pending.SignerIdentityID)
 
 		case totalDecisions > 0 && accCount > totalDecisions/2:
 			// Majority approved.
@@ -203,7 +205,12 @@ func RetryPendingModerations() {
 
 			if pending.MsgCert.Type == "manual_mod" || pending.MsgCert.Reason == "Image attached" {
 				// New message with image: forward to chat DB normally.
-				msgCert := CreateMsgCert(pending.MsgCert.Msg.Content, pending.MsgCert.Msg.Ts, allCerts)
+				privKey, err := identity.LoadPrivateKey(pending.SignerIdentityID)
+				if err != nil {
+					log.Printf("Failed to load signer identity %s for %s: %v", pending.SignerIdentityID, pending.MsgSign, err)
+					continue
+				}
+				msgCert := CreateMsgCertWithPrivateKey(pending.MsgCert.Msg.Content, pending.MsgCert.Msg.Ts, allCerts, privKey)
 				SendToDb(key, msgCert, "/route=store")
 			} else {
 				// Report to delete an existing message.
@@ -211,6 +218,7 @@ func RetryPendingModerations() {
 				SendToDb(key, repCert, "/route=delete")
 			}
 			cache.DeletePendingModeration(pending.MsgSign)
+			maybeCleanupIdentity(pending.SignerIdentityID)
 
 		default:
 			// No clear majority yet, or pending more votes.
@@ -237,6 +245,64 @@ func RetryPendingModerations() {
 	if WailsCtx != nil {
 		runtime.EventsEmit(WailsCtx, "cron_status_update", pendingQueue)
 	}
+}
+
+func maybeCleanupIdentity(identityID string) {
+	if identityID == "" || identityID == identity.MainIdentityID {
+		return
+	}
+	if cache.HasPendingModerationForIdentity(identityID) {
+		return
+	}
+	activeID, err := identity.GetActiveIdentityID()
+	if err == nil && activeID == identityID {
+		return
+	}
+	if err := identity.DeleteIdentity(identityID); err != nil {
+		log.Printf("Failed to cleanup identity %s: %v", identityID, err)
+	}
+}
+
+func buildPendingQueueSnapshot() ([]string, []map[string]interface{}, error) {
+	pattern := filepath.Join(cache.GetCacheDir(), "pending_mods", "*.json")
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var pendingQueue []map[string]interface{}
+	for _, filePath := range files {
+		pending, err := cache.LoadPendingModeration(filePath)
+		if err != nil {
+			logger.LogToFile("[DEBUG] Could not load pending file")
+			log.Printf("Could not load pending file %s: %v", filePath, err)
+			continue
+		}
+
+		var approved, rejected int
+		for _, cert := range pending.PartialCerts {
+			switch cert.Status {
+			case "1":
+				approved++
+			case "0":
+				rejected++
+			}
+		}
+
+		pendingQueue = append(pendingQueue, map[string]interface{}{
+			"id":           pending.MsgSign,
+			"ts":           pending.MsgCert.Msg.Ts,
+			"content":      pending.MsgCert.Msg.Content,
+			"reason":       pending.MsgCert.Reason,
+			"totalMods":    pending.AckCount,
+			"ackCount":     approved + rejected,
+			"approved":     approved,
+			"rejected":     rejected,
+			"awaitingMods": len(pending.AwaitingMods),
+		})
+	}
+
+	return files, pendingQueue, nil
 }
 
 // ---------------------------------------------------------------------------

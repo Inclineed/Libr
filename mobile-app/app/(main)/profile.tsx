@@ -3,11 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, Animated, E
 import { useRef } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { SvgXml } from 'react-native-svg';
-import { Colors } from '@/constants/theme';
+import { Colors, Fonts, getAppColors } from '@/constants/theme';
 import { useAppStore } from '@/store/useAppStore';
 import LibrCore from '@/modules/LibrCore';
-import { Menu, X, Shield, RefreshCcw, ArrowLeft } from 'lucide-react-native';
+import { Shield, RefreshCcw, ArrowLeft, Ghost } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
 function getAvatarUri(svg: string | null): string | null {
@@ -23,9 +22,11 @@ function getAvatarUri(svg: string | null): string | null {
 
 export default function ProfileScreen() {
     const insets = useSafeAreaInsets();
-    const { state, setPublicKey } = useAppStore();
+    const { state, setPublicKey, setIncognito } = useAppStore();
+    const colors = getAppColors(state.isIncognito);
     const router = useRouter();
     const [loading, setLoading] = useState(false);
+    const [incognitoLoading, setIncognitoLoading] = useState(false);
     const rotateAnim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
@@ -56,30 +57,26 @@ export default function ProfileScreen() {
     const [isModerator, setIsModerator] = useState(false);
 
     useEffect(() => {
-        console.log('[Profile] useEffect trigger. publicKey:', state.publicKey ? (state.publicKey.slice(0, 10) + '...') : 'EMPTY');
         if (state.publicKey) {
             (async () => {
                 try {
-                    console.log('[Profile] Generating alias...');
                     const a = await LibrCore.generateAlias(state.publicKey);
-                    console.log('[Profile] Alias result:', a);
                     setAlias(a);
-
-                    console.log('[Profile] Generating avatar...');
                     const av = await LibrCore.generateAvatar(state.publicKey);
-                    console.log('[Profile] Avatar result length:', av?.length);
                     setAvatarSvg(av);
 
                     const mod = await LibrCore.amIMod();
                     setIsModerator(mod);
-                } catch (err: any) {
-                    console.error('[Profile] Error in identity generation:', err);
-                }
+                } catch { }
             })();
-        } else {
-            console.warn('[Profile] No publicKey available in store.');
         }
     }, [state.publicKey]);
+
+    useEffect(() => {
+        LibrCore.isIncognitoEnabled()
+            .then(setIncognito)
+            .catch(() => setIncognito(false));
+    }, [setIncognito]);
 
     const handleResetIdentity = () => {
         Alert.alert(
@@ -111,15 +108,42 @@ export default function ProfileScreen() {
         );
     };
 
+    const handleIncognitoToggle = async () => {
+        setIncognitoLoading(true);
+        try {
+            const nextKey = state.isIncognito
+                ? await LibrCore.disableIncognito()
+                : await LibrCore.enableIncognito();
+
+            if (!nextKey) {
+                Alert.alert('Incognito Unavailable', 'Incognito needs a rebuilt native app before it can switch identities on-device.');
+                return;
+            }
+
+            if (nextKey.startsWith('error:')) {
+                Alert.alert('Error', nextKey);
+                return;
+            }
+
+            setPublicKey(nextKey);
+            setIncognito(!state.isIncognito);
+            setIsModerator(false);
+        } catch (err: any) {
+            Alert.alert('Error', err?.message || 'Failed to update incognito mode');
+        } finally {
+            setIncognitoLoading(false);
+        }
+    };
+
     return (
-        <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-            <StatusBar barStyle="light-content" backgroundColor={Colors.dark.background} />
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
+            <StatusBar barStyle="light-content" backgroundColor={colors.background} />
             {/* Header */}
-            <View style={[styles.header, { paddingTop: Math.max(insets.top, 10) }]}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 10), borderBottomColor: colors.border }]}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <ArrowLeft size={24} color={Colors.dark.text} />
+                    <ArrowLeft size={24} color={colors.text} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Profile</Text>
+                <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
                 <View style={styles.statusContainer}>
                     <View style={[styles.statusDot, { backgroundColor: state.connectionStatus === 'connected' ? '#22c55e' : '#eab308' }]} />
                     <Text style={[styles.statusText, { color: state.connectionStatus === 'connected' ? '#22c55e' : '#eab308' }]}>
@@ -129,9 +153,9 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.content}>
-                <View style={styles.card}>
+                <View style={[styles.card, { backgroundColor: colors.primary, borderColor: colors.border }]}>
                     {/* Avatar */}
-                    <View style={styles.avatarContainer}>
+                    <View style={[styles.avatarContainer, { backgroundColor: colors.border, borderColor: colors.background }]}>
                         {avatarSvg ? (
                             <Image
                                 source={getAvatarUri(avatarSvg)}
@@ -144,36 +168,51 @@ export default function ProfileScreen() {
                     </View>
 
                     {/* Alias */}
-                    <Text style={styles.aliasText}>{alias}</Text>
+                    <Text style={[styles.aliasText, { color: colors.text }]}>{alias}</Text>
 
                     {/* Badge */}
                     {isModerator && (
                         <View style={styles.badge}>
-                            <Shield size={14} color={Colors.dark.background} fill={Colors.dark.background} />
+                            <Shield size={14} color={colors.background} fill={colors.background} />
                             <Text style={styles.badgeText}>Moderator</Text>
                         </View>
                     )}
 
                     <View style={styles.spacer} />
 
+                    <TouchableOpacity
+                        style={[
+                            styles.incognitoBtn,
+                            { borderColor: colors.border },
+                            state.isIncognito && styles.incognitoBtnActive,
+                            incognitoLoading && styles.buttonDisabled
+                        ]}
+                        onPress={handleIncognitoToggle}
+                        disabled={incognitoLoading || loading}
+                        activeOpacity={0.85}
+                    >
+                        <Ghost size={18} color={state.isIncognito ? colors.background : colors.text} />
+                        <View style={styles.actionTextWrap}>
+                            <Text style={[styles.incognitoBtnText, { color: state.isIncognito ? colors.background : colors.text }, state.isIncognito && styles.incognitoBtnTextActive]}>
+                                {incognitoLoading ? 'Switching...' : state.isIncognito ? 'Incognito On' : 'Go Incognito'}
+                            </Text>
+                            <Text style={[styles.incognitoHint, { color: state.isIncognito ? 'rgba(15,10,24,0.72)' : colors.muted }, state.isIncognito && styles.incognitoHintActive]}>
+                                {state.isIncognito ? 'Using a temporary identity until you switch back.' : 'Temporarily swap to a stealth identity.'}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+
                     {/* Actions */}
                     <TouchableOpacity
-                        style={[styles.resetBtn, loading && styles.resetBtnLoading]}
+                        style={[styles.resetBtn, loading && styles.buttonDisabled]}
                         onPress={handleResetIdentity}
-                        disabled={loading}
+                        disabled={loading || incognitoLoading}
                         activeOpacity={0.8}
                     >
                         <Animated.View style={{ transform: [{ rotate: spin }] }}>
                             <RefreshCcw size={20} color="#fff" />
                         </Animated.View>
                         <Text style={styles.resetBtnText}>{loading ? 'Resetting...' : 'Reset Identity'}</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.closeBtn}
-                        onPress={() => router.canGoBack() ? router.back() : router.replace('/')}
-                    >
-                        <Text style={styles.closeBtnText}>Close</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -195,18 +234,10 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: Colors.dark.border,
     },
-    headerBtn: {
-        padding: 8,
-    },
-    menuBtn: {
-        backgroundColor: Colors.dark.border,
-        borderRadius: 8,
-        padding: 6,
-    },
     headerTitle: {
         fontSize: 20,
-        fontWeight: '700',
         color: Colors.dark.text,
+        fontFamily: Fonts.display,
     },
     backButton: {
         padding: 8,
@@ -223,7 +254,7 @@ const styles = StyleSheet.create({
     },
     statusText: {
         fontSize: 12,
-        fontWeight: '600',
+        fontFamily: Fonts.medium,
     },
     content: {
         flex: 1,
@@ -265,10 +296,10 @@ const styles = StyleSheet.create({
     },
     aliasText: {
         fontSize: 24,
-        fontWeight: '800',
         color: Colors.dark.text,
         marginBottom: 12,
         textAlign: 'center',
+        fontFamily: Fonts.display,
     },
     badge: {
         flexDirection: 'row',
@@ -281,50 +312,73 @@ const styles = StyleSheet.create({
     },
     badgeText: {
         color: Colors.dark.background,
-        fontWeight: '800',
         fontSize: 13,
         textTransform: 'uppercase',
+        fontFamily: Fonts.medium,
     },
     spacer: {
-        height: 32,
+        height: 24,
+    },
+    incognitoBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        borderWidth: 1,
+        borderColor: Colors.dark.border,
+        paddingHorizontal: 18,
+        paddingVertical: 14,
+        borderRadius: 16,
+        width: '100%',
+        justifyContent: 'flex-start',
+        marginBottom: 12,
+        gap: 10,
+    },
+    incognitoBtnActive: {
+        backgroundColor: '#b49cff',
+        borderColor: '#b49cff',
+    },
+    actionTextWrap: {
+        flex: 1,
+    },
+    incognitoBtnText: {
+        color: Colors.dark.text,
+        fontSize: 16,
+        fontFamily: Fonts.medium,
+        marginBottom: 2,
+    },
+    incognitoBtnTextActive: {
+        color: Colors.dark.background,
+    },
+    incognitoHint: {
+        color: Colors.dark.muted,
+        fontSize: 12,
+        fontFamily: Fonts.sans,
+    },
+    incognitoHintActive: {
+        color: 'rgba(10,15,28,0.72)',
     },
     resetBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#ef4444', // Vibrant warning red
+        backgroundColor: Colors.dark.red,
         paddingHorizontal: 20,
         paddingVertical: 14,
-        borderRadius: 12,
+        borderRadius: 16,
         width: '100%',
         justifyContent: 'center',
-        marginBottom: 12,
         gap: 8,
-        shadowColor: '#ef4444',
+        shadowColor: Colors.dark.red,
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
+        shadowOpacity: 0.24,
         shadowRadius: 8,
         elevation: 4,
     },
-    resetBtnLoading: {
-        opacity: 0.8,
-        backgroundColor: '#991b1b', // Darker red when loading
+    buttonDisabled: {
+        opacity: 0.7,
     },
     resetBtnText: {
         color: '#fff',
         fontSize: 16,
-        fontWeight: '700',
-    },
-    closeBtn: {
-        backgroundColor: Colors.dark.tint,
-        paddingHorizontal: 20,
-        paddingVertical: 14,
-        borderRadius: 12,
-        width: '100%',
-        alignItems: 'center',
-    },
-    closeBtnText: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: '700',
+        fontFamily: Fonts.medium,
     }
 });

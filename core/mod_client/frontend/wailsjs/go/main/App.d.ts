@@ -8,6 +8,10 @@ export function Connect(arg1:Array<string>):Promise<void>;
 
 export function Delete(arg1:types.MsgCert):Promise<string>;
 
+export function DisableIncognito():Promise<string>;
+
+export function EnableIncognito():Promise<string>;
+
 export function FetchAll():Promise<Array<types.RetMsgCert>>;
 
 export function FetchMessageReports():Promise<Array<models.MsgCert>>;
@@ -29,6 +33,8 @@ export function GetPendingModerationStats():Promise<main.PendingModerationStats>
 export function GetRelayAddr():Promise<Array<string>>;
 
 export function GetRelayStatus():Promise<string>;
+
+export function IsIncognitoEnabled():Promise<boolean>;
 
 export function IsModerationCronRunning():Promise<boolean>;
 

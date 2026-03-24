@@ -400,6 +400,13 @@ func (cp *ChatPeer) handleChatStream(s network.Stream) {
 }
 
 func (cp *ChatPeer) Send(ctx context.Context, targetPeerID string, jsonReq []byte, body []byte) ([]byte, error) {
+	if cp == nil {
+		return nil, fmt.Errorf("chat peer is nil")
+	}
+	if cp.Host == nil {
+		return nil, fmt.Errorf("chat peer host is nil")
+	}
+
 	//completeIP := TargetIP + ":" + targetPort
 
 	var req reqFormat

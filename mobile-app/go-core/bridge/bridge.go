@@ -17,6 +17,7 @@ import (
 	"github.com/libr-forum/Libr/core/mod_client/config"
 	"github.com/libr-forum/Libr/core/mod_client/core"
 	cache "github.com/libr-forum/Libr/core/mod_client/core/cache_handler"
+	"github.com/libr-forum/Libr/core/mod_client/identity"
 	"github.com/libr-forum/Libr/core/mod_client/keycache"
 	peer "github.com/libr-forum/Libr/core/mod_client/peers"
 	"github.com/libr-forum/Libr/core/mod_client/types"
@@ -146,6 +147,9 @@ func InitApp(keyDir string, serverURL string) string {
 		util.InitServerClient(serverURL)
 	}
 	keycache.InitKeys()
+	if err := identity.EnsureInitialized(); err != nil {
+		return base64.StdEncoding.EncodeToString(keycache.PubKey)
+	}
 	return base64.StdEncoding.EncodeToString(keycache.PubKey)
 }
 
@@ -158,7 +162,48 @@ func GetPublicKey() string {
 func RegenKeys() string {
 	cryptoutils.GenerateKeyPair() // generates + persists to disk
 	keycache.InitKeys()           // reload from disk
+	_ = identity.SyncActiveIdentity()
 	return base64.StdEncoding.EncodeToString(keycache.PubKey)
+}
+
+func IsIncognitoEnabled() bool {
+	activeID, err := identity.GetActiveIdentityID()
+	return err == nil && activeID != identity.MainIdentityID
+}
+
+func EnableIncognito() string {
+	if IsIncognitoEnabled() {
+		return base64.StdEncoding.EncodeToString(keycache.PubKey)
+	}
+	incognitoID, _, err := identity.CreateIncognitoIdentity()
+	if err != nil {
+		return fmt.Sprintf("error:create incognito identity: %v", err)
+	}
+	pubKey, err := identity.ActivateIdentity(incognitoID)
+	if err != nil {
+		_ = identity.DeleteIdentity(incognitoID)
+		return fmt.Sprintf("error:activate incognito identity: %v", err)
+	}
+	return pubKey
+}
+
+func DisableIncognito() string {
+	if !IsIncognitoEnabled() {
+		keycache.InitKeys()
+		return base64.StdEncoding.EncodeToString(keycache.PubKey)
+	}
+	activeID, err := identity.GetActiveIdentityID()
+	if err != nil {
+		return fmt.Sprintf("error:read active identity: %v", err)
+	}
+	pubKey, err := identity.ActivateIdentity(identity.MainIdentityID)
+	if err != nil {
+		return fmt.Sprintf("error:restore main identity: %v", err)
+	}
+	if activeID != identity.MainIdentityID && !cache.HasPendingModerationForIdentity(activeID) {
+		_ = identity.DeleteIdentity(activeID)
+	}
+	return pubKey
 }
 
 // ── Discovery server helpers ──────────────────────────────────────────────────

@@ -85,6 +85,35 @@ body,
     /* --libr-accent1: 166 84 95; */
     --libr-accent2: 0 252 223;
   }
+
+  .dark.incognito-theme {
+    --background: 267 36% 8%;
+    --foreground: 270 40% 96%;
+
+    --card: 267 32% 11%;
+    --card-foreground: 270 40% 96%;
+
+    --popover: 267 32% 11%;
+    --popover-foreground: 270 40% 96%;
+
+    --secondary: 268 24% 18%;
+    --secondary-foreground: 270 40% 96%;
+
+    --muted: 268 24% 18%;
+    --muted-foreground: 264 22% 72%;
+
+    --accent: 268 24% 18%;
+    --accent-foreground: 270 40% 96%;
+
+    --border: 268 30% 22%;
+    --input: 268 30% 22%;
+    --ring: 269 52% 72%;
+
+    --libr-primary: 15 10 24;
+    --libr-secondary: 242 238 252;
+    --libr-accent1: 155 112 212;
+    --libr-accent2: 215 181 255;
+  }
 }
 
 @layer base {

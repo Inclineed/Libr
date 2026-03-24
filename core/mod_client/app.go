@@ -18,6 +18,7 @@ import (
 	cache "github.com/libr-forum/Libr/core/mod_client/cache_handler"
 	"github.com/libr-forum/Libr/core/mod_client/config"
 	"github.com/libr-forum/Libr/core/mod_client/core"
+	"github.com/libr-forum/Libr/core/mod_client/identity"
 	moddb "github.com/libr-forum/Libr/core/mod_client/internal/mod_db"
 	service "github.com/libr-forum/Libr/core/mod_client/internal/service"
 	"github.com/libr-forum/Libr/core/mod_client/keycache"
@@ -38,6 +39,7 @@ type App struct {
 func NewApp() *App {
 	cache.InitCacheFile()
 	keycache.InitKeys()
+	_ = identity.EnsureInitialized()
 	config.LoadConfig()
 	util.InitServerClient(config.GetServerURL())
 	amImod, _ := util.AmIMod(base64.StdEncoding.EncodeToString(keycache.PubKey))
@@ -138,7 +140,65 @@ func (a *App) GenerateAlias(key string) string {
 func (a *App) RegenKeys() string {
 	pub, _, _ := cryptoutils.GenerateKeyPair()
 	keycache.InitKeys()
+	_ = identity.SyncActiveIdentity()
+	a.refreshModeratorState()
 	return base64.StdEncoding.EncodeToString(pub)
+}
+
+func (a *App) refreshModeratorState() bool {
+	amImod, _ := util.AmIMod(base64.StdEncoding.EncodeToString(keycache.PubKey))
+	a.isMod = amImod
+	return amImod
+}
+
+func (a *App) IsIncognitoEnabled() bool {
+	activeID, err := identity.GetActiveIdentityID()
+	return err == nil && activeID != identity.MainIdentityID
+}
+
+func (a *App) EnableIncognito() string {
+	if a.IsIncognitoEnabled() {
+		return base64.StdEncoding.EncodeToString(keycache.PubKey)
+	}
+
+	incognitoID, _, err := identity.CreateIncognitoIdentity()
+	if err != nil {
+		return fmt.Sprintf("error:create incognito identity: %v", err)
+	}
+
+	pubKey, err := identity.ActivateIdentity(incognitoID)
+	if err != nil {
+		_ = identity.DeleteIdentity(incognitoID)
+		return fmt.Sprintf("error:activate incognito identity: %v", err)
+	}
+
+	a.refreshModeratorState()
+	return pubKey
+}
+
+func (a *App) DisableIncognito() string {
+	if !a.IsIncognitoEnabled() {
+		keycache.InitKeys()
+		a.refreshModeratorState()
+		return base64.StdEncoding.EncodeToString(keycache.PubKey)
+	}
+
+	activeID, err := identity.GetActiveIdentityID()
+	if err != nil {
+		return fmt.Sprintf("error:read active identity: %v", err)
+	}
+
+	pubKey, err := identity.ActivateIdentity(identity.MainIdentityID)
+	if err != nil {
+		return fmt.Sprintf("error:restore main identity: %v", err)
+	}
+
+	a.refreshModeratorState()
+	if activeID != identity.MainIdentityID && !cache.HasPendingModerationForIdentity(activeID) {
+		_ = identity.DeleteIdentity(activeID)
+	}
+
+	return pubKey
 }
 
 func (a *App) Connect(relayAdds []string) error {
@@ -415,13 +475,6 @@ func (a *App) FetchMessageReports() []models.MsgCert {
 func (a *App) ManualModerate(cert types.MsgCert, moderated int) {
 	modsign, _ := moddb.ReportModSign(&cert, strconv.Itoa(moderated), keycache.PrivKey, keycache.PubKey)
 	moddb.UpdateModerationStatus(cert.Sign, modsign, moderated)
-
-	// Append manual record to the modlog history!
-	msg := models.UserMsg{
-		Content:   cert.Msg.Content,
-		TimeStamp: cert.Msg.Ts,
-	}
-	service.AppendToModLog(msg, strconv.Itoa(moderated))
 }
 
 // IsModerationCronRunning exposes the cron status to the frontend via Wails.
@@ -453,13 +506,6 @@ func (a *App) ModerateBySign(sign string, moderated int) {
 		log.Printf("[ModerateBySign] update error: %v", err)
 	} else {
 		log.Printf("[ModerateBySign] sign=%s moderated=%d updated OK", sign, moderated)
-		
-		// Append manual record to the modlog history!
-		msg := models.UserMsg{
-			Content:   content,
-			TimeStamp: ts,
-		}
-		service.AppendToModLog(msg, strconv.Itoa(moderated))
 	}
 }
 

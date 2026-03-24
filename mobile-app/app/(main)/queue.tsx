@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, RefreshControl, ActivityIndicator, StatusBar, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, RefreshControl, ActivityIndicator, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors as C } from '@/constants/theme';
+import { Colors as C, Fonts } from '@/constants/theme';
 import LibrCore from '@/modules/LibrCore';
 import { useAppStore } from '@/store/useAppStore';
 import { useRouter } from 'expo-router';
@@ -217,7 +217,7 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         fontSize: 18,
-        fontWeight: '800',
+        fontFamily: Fonts.bold,
         color: C.dark.text,
     },
     listContent: {
@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
     cardTime: {
         color: C.dark.icon,
         fontSize: 12,
-        fontWeight: '600',
+        fontFamily: Fonts.medium,
         flex: 1,
     },
     reasonBadge: {
@@ -261,10 +261,10 @@ const styles = StyleSheet.create({
     reasonText: {
         color: '#fff',
         fontSize: 11,
-        fontWeight: '700',
+        fontFamily: Fonts.bold,
     },
     contentBox: {
-        backgroundColor: 'rgba(0,0,0,0.2)',
+        backgroundColor: 'transparent',
         padding: 12,
         borderRadius: 12,
         marginBottom: 16,
@@ -272,6 +272,7 @@ const styles = StyleSheet.create({
     contentText: {
         color: C.dark.text,
         fontSize: 15,
+        fontFamily: Fonts.sans,
         lineHeight: 22,
     },
     cardFooter: {
@@ -282,7 +283,7 @@ const styles = StyleSheet.create({
     pubKey: {
         color: C.dark.icon,
         fontSize: 11,
-        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+        fontFamily: Fonts.mono,
     },
     actions: {
         flexDirection: 'row',
@@ -311,6 +312,7 @@ const styles = StyleSheet.create({
     loadingText: {
         color: C.dark.icon,
         fontSize: 14,
+        fontFamily: Fonts.sans,
     },
     emptyContainer: {
         marginTop: 100,
@@ -321,7 +323,7 @@ const styles = StyleSheet.create({
     emptyText: {
         color: C.dark.text,
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: Fonts.medium,
     },
     imageGallery: {
         flexDirection: 'row',

@@ -26,6 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 
 interface MessageBubbleProps {
   message: Message;
@@ -92,14 +93,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const safeTextHtml = tempDiv.innerHTML;
 
   const status = getStatus();
-  const user = useAppStore.getState().user;
+  const { user, isIncognito } = useAppStore();
 
-  const [showReportPopup, setShowReportPopup] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
 
   const handleReportSubmit = async () => {
+    if (isIncognito) {
+      setIsReportDialogOpen(false);
+      setReportReason("");
+      toast.error("Reporting disabled", {
+        description: "Turn off incognito before sending reports.",
+      });
+      return;
+    }
+
     const msg: types.Msg = {
       content: message.content,
       ts: Number(message.timestamp),
@@ -111,11 +120,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
       sign: message.sign,
     });
 
-    Report(msgcert, reportReason || "No reason provided");
+    const result = await Report(msgcert, reportReason || "No reason provided");
     setIsReportDialogOpen(false);
     setReportReason("");
-    setShowReportPopup(true);
-    setTimeout(() => setShowReportPopup(false), 2500);
+    toast.message("Report submitted", {
+      description: typeof result === 'string' && result.length > 0
+        ? result.replace(/:[^ ]+:/g, '').trim()
+        : "Your report has been sent to moderators for review.",
+    });
   };
 
   return (
@@ -205,7 +217,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
                   {message.authorPublicKey === user.publicKey ? (
                     <DropdownMenuItem
-                      onClick={() => {
+                      onClick={async () => {
                         const msg: types.Msg = {
                           content: message.content,
                           ts: Number(message.timestamp),
@@ -217,7 +229,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                           sign: message.sign,
 
                         });
-                        Delete(msgcert);
+                        const result = await Delete(msgcert);
+                        toast.message("Delete requested", {
+                          description: typeof result === 'string' && result.length > 0
+                            ? result.replace(/:[^ ]+:/g, '').trim()
+                            : "Your delete request has been sent.",
+                        });
                       }}
                       className="text-destructive cursor-pointer hover:bg-destructive/10"
                     >
@@ -225,10 +242,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                     </DropdownMenuItem>
                   ) : (
                     <DropdownMenuItem
-                      onClick={() => setIsReportDialogOpen(true)}
+                      onClick={() => {
+                        if (isIncognito) {
+                          toast.error("Reporting disabled", {
+                            description: "Turn off incognito before sending reports.",
+                          });
+                          return;
+                        }
+                        setIsReportDialogOpen(true);
+                      }}
                       className="text-destructive cursor-pointer hover:bg-destructive/10"
                     >
-                      Report
+                      {isIncognito ? 'Blocked In Incognito' : 'Report'}
                     </DropdownMenuItem>
                   )}
 
@@ -309,13 +334,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
             `}
           </style>
       </motion.div>
-      {showReportPopup && (
-        <div className="fixed top-8 left-1/2 transform -translate-x-1/2 z-50 libr-card text-libr-secondary px-6 py-3 rounded-xl shadow-lg font-semibold text-center">
-          Your report has been received.<br />
-          It will be acted upon soon.
-        </div>
-      )}
-
       {/* Lightbox */}
       <AnimatePresence>
         {lightboxSrc && (

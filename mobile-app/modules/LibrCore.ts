@@ -79,6 +79,12 @@ interface LibrCoreInterface {
   getPublicKey(): Promise<string>;
   /** Regenerate key pair; returns new public key (base64). */
   regenKeys(): Promise<string>;
+  /** Enables a temporary incognito identity and returns its public key. */
+  enableIncognito(): Promise<string>;
+  /** Restores the primary identity and returns its public key. */
+  disableIncognito(): Promise<string>;
+  /** Returns whether the app is currently using an incognito identity. */
+  isIncognitoEnabled(): Promise<boolean>;
 
   // ── Discovery ────────────────────────────────────────────────────────────
   /** Returns JSON array of relay multiaddress strings. */
@@ -127,6 +133,9 @@ const MockLibrCore: LibrCoreInterface = {
   initApp: async () => { console.warn('[LibrCore mock] initApp'); return 'mock_pubkey_base64'; },
   getPublicKey: async () => 'mock_pubkey_base64',
   regenKeys: async () => 'new_mock_pubkey_base64',
+  enableIncognito: async () => 'incognito_mock_pubkey_base64',
+  disableIncognito: async () => 'mock_pubkey_base64',
+  isIncognitoEnabled: async () => false,
   getRelayAddresses: async () => '[]',
   getOnlineMods: async () => '[]',
   amIMod: async () => false,

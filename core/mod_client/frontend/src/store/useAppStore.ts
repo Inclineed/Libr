@@ -63,6 +63,7 @@ interface AppState {
   // User state
   user: User | null;
   isAuthenticated: boolean;
+  isIncognito: boolean;
   
   // Theme state
   isDarkMode: boolean;
@@ -80,6 +81,7 @@ interface AppState {
 
   // Actions
   setUser: (user: User) => void;
+  setIncognito: (value: boolean) => void;
   logout: () => void;
   toggleTheme: () => void;
   setCommunities: (communities: Community[]) => void;
@@ -97,6 +99,7 @@ export const useAppStore = create<AppState>()(
       // Initial state
       user: null,
       isAuthenticated: false,
+      isIncognito: false,
       isDarkMode: true,
       communities: [],
       currentCommunity: null,
@@ -106,10 +109,12 @@ export const useAppStore = create<AppState>()(
 
       // Actions
       setUser: (user) => set({ user, isAuthenticated: true }),
+      setIncognito: (value) => set({ isIncognito: value }),
       
       logout: () => set({ 
         user: null, 
         isAuthenticated: false,
+        isIncognito: false,
         currentCommunity: null,
         messages: [] 
       }),

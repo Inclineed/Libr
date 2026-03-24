@@ -2,7 +2,8 @@ import { Stack } from 'expo-router';
 import React, { createContext, useContext, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Sidebar } from '@/components/Sidebar';
-import { Colors } from '@/constants/theme';
+import { getAppColors } from '@/constants/theme';
+import { useAppStore } from '@/store/useAppStore';
 
 interface SidebarContextType {
   openSidebar: () => void;
@@ -22,6 +23,8 @@ export const useSidebar = () => useContext(SidebarContext);
 
 export default function SidebarLayout() {
   const [isOpen, setIsOpen] = useState(false);
+  const { state } = useAppStore();
+  const colors = getAppColors(state.isIncognito);
 
   const openSidebar = () => setIsOpen(true);
   const closeSidebar = () => setIsOpen(false);
@@ -29,11 +32,11 @@ export default function SidebarLayout() {
 
   return (
     <SidebarContext.Provider value={{ openSidebar, closeSidebar, toggleSidebar, isOpen }}>
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Stack
           screenOptions={{
             headerShown: false,
-            contentStyle: { backgroundColor: Colors.dark.background },
+            contentStyle: { backgroundColor: colors.background },
           }}
         >
           <Stack.Screen name="index" />
@@ -50,6 +53,6 @@ export default function SidebarLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: 'transparent',
   },
 });

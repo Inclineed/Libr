@@ -82,6 +82,24 @@ func GetAllPendingModerations() ([]types.PendingModeration, error) {
 	return results, nil
 }
 
+func HasPendingModerationForIdentity(identityID string) bool {
+	if identityID == "" {
+		return false
+	}
+
+	pendings, err := GetAllPendingModerations()
+	if err != nil {
+		return false
+	}
+
+	for _, pending := range pendings {
+		if pending.SignerIdentityID == identityID {
+			return true
+		}
+	}
+	return false
+}
+
 func sanitizeFileName(msgSign string) string {
 	return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString([]byte(msgSign))
 }

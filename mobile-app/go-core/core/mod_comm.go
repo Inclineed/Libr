@@ -10,6 +10,7 @@ import (
 
 	"github.com/libr-forum/Libr/core/crypto/cryptoutils"
 	cache "github.com/libr-forum/Libr/core/mod_client/core/cache_handler"
+	"github.com/libr-forum/Libr/core/mod_client/identity"
 	"github.com/libr-forum/Libr/core/mod_client/network"
 	"github.com/libr-forum/Libr/core/mod_client/types"
 	util "github.com/libr-forum/Libr/core/mod_client/util"
@@ -78,7 +79,6 @@ func AutoSendToMods(message string, ts int64) ([]types.ModCert, error) {
 					mu.Lock()
 					modcertList = append(modcertList, modcert)
 					if modcert.Status == "1" {
-						// Early-exit once we have a majority approval
 						once.Do(func() {
 							if len(modcertList) >= (len(onlineMods)/2 + 1) {
 								cancel()
@@ -107,12 +107,11 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 		unresponsive int
 
 		modcertList []types.ModCert
-		ackMods     []string // for AwaitingMods
+		ackMods     []string
 		mu          sync.Mutex
 		wg          sync.WaitGroup
 	)
 
-	// Attach the reason (first try may have a reason, retries usually "")
 	if reason != "" {
 		cert.Reason = reason
 	}
@@ -130,11 +129,10 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 
 			respChan := make(chan interface{}, 1)
 
-			// Send report to mod
 			go func() {
 				resp, err := network.SendTo(mod.PeerId, "/route=manual", cert, "mod")
 				if err != nil {
-					log.Printf("Error sending to %s — %v", mod.PeerId, err)
+					log.Printf("Error sending to %s - %v", mod.PeerId, err)
 					return
 				}
 				respChan <- resp
@@ -154,35 +152,34 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 					return
 				}
 
-				// If they ACK, store for retry
 				if modcert.Status == "acknowledged" && modcert.Sign == cert.Sign {
 					mu.Lock()
-					ackMods = append(ackMods, mod.PublicKey) // always store for AwaitingMods
+					ackMods = append(ackMods, mod.PublicKey)
 					if firstTry {
-						ackCount++ // Only count ACKs in the first try
+						ackCount++
 					}
 					mu.Unlock()
 					log.Printf("Mod %s acknowledged", mod.PeerId)
 					return
+				}
+
+				var msgHash string
+				if cert.Type == "manual_mod" {
+					msgHash = cert.Msg.Content + strconv.FormatInt(cert.Msg.Ts, 10) + modcert.Status
 				} else {
-					// Verify signature for non-acknowledgement.
-					var msgHash string
-					if cert.Type == "manual_mod" {
-						msgHash = cert.Msg.Content + strconv.FormatInt(cert.Msg.Ts, 10) + modcert.Status
-					} else {
-						msgHash = cert.Sign + modcert.Status
+					msgHash = cert.Sign + modcert.Status
+				}
+
+				if cryptoutils.VerifySignature(modcert.PublicKey, msgHash, modcert.Sign) {
+					log.Printf("Received valid modcert from %s", mod.PeerId)
+					mu.Lock()
+					modcertList = append(modcertList, modcert)
+					if modcert.Status != "1" {
+						rejCount++
 					}
-					if cryptoutils.VerifySignature(modcert.PublicKey, msgHash, modcert.Sign) {
-						log.Printf("Received valid modcert from %s", mod.PeerId)
-						mu.Lock()
-						modcertList = append(modcertList, modcert)
-						if modcert.Status != "1" {
-							rejCount++
-						}
-						mu.Unlock()
-					} else {
-						log.Printf("Invalid signature from mod %s", mod.PeerId)
-					}
+					mu.Unlock()
+				} else {
+					log.Printf("Invalid signature from mod %s", mod.PeerId)
 				}
 			}
 		}(mod)
@@ -195,23 +192,33 @@ func ManualSendToMods(cert types.MsgCert, mods []types.Mod, reason string, first
 			cert.Sign, len(modcertList), ackCount, unresponsive, totalMods)
 	}
 
-	// Save pending state only on first try
 	if len(ackMods) > 0 && firstTry {
-		log.Printf("🔄 Saving %d ACK mods for retry", len(ackMods))
+		log.Printf("Saving %d ACK mods for retry", len(ackMods))
+		activeIdentityID, err := identity.GetActiveIdentityID()
+		if err != nil {
+			log.Printf("Failed to read active identity: %v", err)
+			activeIdentityID = identity.MainIdentityID
+		}
+
 		pending := types.PendingModeration{
-			MsgSign:      cert.Sign,
-			MsgCert:      cert,
-			PartialCerts: modcertList,
-			AwaitingMods: ackMods,
-			AckCount:     len(ackMods), // needed by cron for approval ratio
-			CreatedAt:    time.Now(),
+			MsgSign:          cert.Sign,
+			MsgCert:          cert,
+			PartialCerts:     modcertList,
+			AwaitingMods:     ackMods,
+			AckCount:         len(ackMods),
+			SignerIdentityID: activeIdentityID,
+			CreatedAt:        time.Now(),
 		}
 
 		if err := cache.SavePendingModeration(pending); err != nil {
-			log.Printf("❌ Failed to save pending moderation: %v", err)
+			log.Printf("Failed to save pending moderation: %v", err)
 		} else {
 			StartModerationCron()
 		}
+	}
+
+	if len(modcertList) == 0 && len(ackMods) > 0 {
+		return []types.ModCert{}
 	}
 
 	return modcertList

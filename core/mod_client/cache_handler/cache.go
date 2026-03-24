@@ -170,6 +170,40 @@ func DeletePendingModeration(msgSign string) error {
 	return nil
 }
 
+func GetAllPendingModerations() ([]types.PendingModeration, error) {
+	pattern := filepath.Join(GetCacheDir(), "pending_mods", "*.json")
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending files: %w", err)
+	}
+
+	var results []types.PendingModeration
+	for _, filePath := range files {
+		if pending, err := LoadPendingModeration(filePath); err == nil {
+			results = append(results, pending)
+		}
+	}
+	return results, nil
+}
+
+func HasPendingModerationForIdentity(identityID string) bool {
+	if identityID == "" {
+		return false
+	}
+
+	pendings, err := GetAllPendingModerations()
+	if err != nil {
+		return false
+	}
+
+	for _, pending := range pendings {
+		if pending.SignerIdentityID == identityID {
+			return true
+		}
+	}
+	return false
+}
+
 func sanitizeFileName(msgSign string) string {
 	return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString([]byte(msgSign))
 }
