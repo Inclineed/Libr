@@ -245,6 +245,11 @@ func AmIMod() bool {
 func SendTextMessage(content string) string {
 	ts := time.Now().Unix()
 
+	// 0. Defensive Size Check: Enforce ~1MB limit (with small buffer for protocol/text overhead)
+	if len(content) > 1100000 {
+		return "error:Message too large (max 1MB for media content)"
+	}
+
 	// 1. Detection: Is this an image message?
 	// Mobile encodes images as <img src="data:image/jpeg;base64,..."/> inside <BODY>.
 	// Use strings.Contains so the check is reliable regardless of where in the

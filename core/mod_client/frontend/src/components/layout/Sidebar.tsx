@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { useSidebarStore } from '../../store/useSidebarStore';
 import { Shield, Cog, Hash, Plus, Settings, Moon, Sun, RefreshCcw, ChevronLeft, Eye, Menu, Wrench, User, AlertTriangle, Ghost } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { DisableIncognito, EnableIncognito, RegenKeys } from 'wailsjs/go/main/App';
+import { DisableIncognito, EnableIncognito, RegenKeys, Connect, GetRelayAddr } from 'wailsjs/go/main/App';
 import logoSVG from '../assets/icon_transparent.svg';
 import { apiService } from '@/services/api';
 import { logger } from '../../logger/logger';
@@ -33,13 +33,30 @@ export const Sidebar: React.FC = () => {
     isDarkMode,
     toggleTheme,
     joinCommunity,
-    setCommunities
+    setCommunities,
+    relayStatus
   } = useAppStore();
 
   const navigate = useNavigate();
   const location = useLocation();
   const [isReloadingCommunities, setIsReloadingCommunities] = React.useState(false);
   const [isIncognitoLoading, setIsIncognitoLoading] = React.useState(false);
+  const [isRetrying, setIsRetrying] = React.useState(false);
+
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    try {
+      const addrs = await GetRelayAddr();
+      const validAddrs = addrs.filter(addr => addr.startsWith('/'));
+      await Connect(validAddrs);
+      toast.success("Reconnection attempt started");
+    } catch (error) {
+      logger.error("Retry failed", { error });
+      toast.error("Retry failed");
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   const handleCommunitySelect = (community: any) => {
     logger.debug("Selected community", community);
@@ -430,6 +447,24 @@ export const Sidebar: React.FC = () => {
                       }
                       return <span className="inline-flex items-center px-2 rounded-lg bg-libr-accent1/20 text-libr-accent1">🗣 Member</span>;
                     })()}
+                  </div>
+                  <div className="flex items-center justify-between mt-2 pt-1 border-t border-border/20">
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-2 h-2 rounded-full ${relayStatus === 'online' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]'}`} />
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest flex items-center">
+                        Network: <span className={`ml-1.5 ${relayStatus === 'online' ? 'text-green-500/90' : 'text-red-500/90'}`}>{relayStatus}</span>
+                      </span>
+                    </div>
+                    {relayStatus === 'offline' && (
+                      <button 
+                        disabled={isRetrying}
+                        onClick={handleRetry}
+                        className="text-[10px] bg-muted hover:bg-muted/80 px-2 py-0.5 rounded-md text-muted-foreground border border-border/50 flex items-center space-x-1 transition-all"
+                      >
+                        <RefreshCcw className={`w-3 h-3 ${isRetrying ? 'animate-spin' : ''}`} />
+                        <span>{isRetrying ? 'Retrying...' : 'Retry'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

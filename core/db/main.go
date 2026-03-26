@@ -21,13 +21,12 @@ func main() {
 		serverURL = "https://libr-relay007-1.onrender.com"
 	}
 	utils.InitServerClient(serverURL)
+
 	relayAddrs, err := utils.GetRelayAddr()
 	if err != nil || len(relayAddrs) == 0 {
 		fmt.Println("Error while getting relay address, ", err)
-		fmt.Println("No relay addresses available. Is SERVER_URL reachable?")
 		os.Exit(1)
 	}
-	fmt.Println(relayAddrs)
 
 	peer.StartNode(relayAddrs)
 

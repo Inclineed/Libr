@@ -115,6 +115,8 @@ interface LibrCoreInterface {
   startCron(): Promise<string>;
   /** Stop the background moderation cron job. */
   stopCron(): Promise<string>;
+  /** Perform a one-shot background cron tick. */
+  tickCron(): Promise<string>;
 
   // ── Identity ─────────────────────────────────────────────────────────────
   /** Returns a human-readable alias for a base64 public key. */
@@ -160,6 +162,7 @@ const MockLibrCore: LibrCoreInterface = {
   },
   startCron: async () => 'ok',
   stopCron: async () => 'ok',
+  tickCron: async () => 'ok',
   generateAlias: async (k) => k.slice(0, 10),
   generateAvatar: async (k) => '',
 };

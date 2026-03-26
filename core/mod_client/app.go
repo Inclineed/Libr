@@ -205,7 +205,10 @@ func (a *App) Connect(relayAdds []string) error {
 	if len(relayAdds) == 0 {
 		return fmt.Errorf("No relay addresses provided")
 	}
-	err := Peers.StartNode(relayAdds)
+	err := Peers.StartNode(relayAdds, func(status string) {
+		a.relayStatus = status
+		runtime.EventsEmit(a.ctx, "relay_status_changed", status)
+	})
 	if err != nil {
 		a.relayStatus = "offline"
 		return err
@@ -252,6 +255,11 @@ func (a *App) TitleBarTheme(isDark bool) {
 func (a *App) SendInput(input string) (types.SendResult, error) {
 	if a.relayStatus != "online" {
 		return types.SendResult{Status: "offline"}, nil
+	}
+
+	// Defensive Size Check: Enforce ~1MB limit
+	if len(input) > 1100000 {
+		return types.SendResult{Status: "error"}, fmt.Errorf("message too large (max 1MB)")
 	}
 
 	ts := time.Now().Unix()
@@ -301,6 +309,11 @@ func (a *App) SendInput(input string) (types.SendResult, error) {
 func (a *App) SendImageInput(input string) types.SendResult {
 	if a.relayStatus != "online" {
 		return types.SendResult{Status: "offline"}
+	}
+
+	// Defensive Size Check: Enforce ~1MB limit
+	if len(input) > 1100000 {
+		return types.SendResult{Status: "error"}
 	}
 
 	ts := time.Now().Unix()

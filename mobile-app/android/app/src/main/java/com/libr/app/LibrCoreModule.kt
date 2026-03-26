@@ -202,6 +202,13 @@ class LibrCoreModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
         }.start()
     }
 
+    @ReactMethod fun tickCron(promise: Promise) {
+        Thread {
+            try { promise.resolve(callBridgeString("tickCron")?.toString() ?: "error:not_built") }
+            catch (e: Exception) { promise.reject("ERR_TICK_CRON", e.message) }
+        }.start()
+    }
+
     @ReactMethod fun fetchReports(promise: Promise) {
         Thread {
             try { promise.resolve(callBridgeString("fetchReports")?.toString() ?: "[]") }

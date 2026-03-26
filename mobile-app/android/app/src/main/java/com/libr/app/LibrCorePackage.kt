@@ -14,6 +14,8 @@ class LibrCorePackage : ReactPackage {
     }
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
-        return emptyList()
+        val managers = ArrayList<ViewManager<*, *>>()
+        managers.add(RichTextInputManager())
+        return managers
     }
 }

@@ -45,10 +45,11 @@ const ChatProtocol = protocol.ID("/chat/1.0.0")
 var OwnPubIP string
 
 type ChatPeer struct {
-	Host      host.Host
-	relayAddr multiaddr.Multiaddr
-	relayID   peer.ID
-	peers     map[peer.ID]string // peer ID to nickname mapping
+	Host           host.Host
+	relayAddr      multiaddr.Multiaddr
+	relayID        peer.ID
+	peers          map[peer.ID]string // peer ID to nickname mapping
+	OnStatusChange func(string)
 }
 
 type reqFormat struct {
@@ -260,7 +261,10 @@ func (cp *ChatPeer) registerWithRelay(relayID peer.ID) error {
 	fmt.Println(reqSent.PeerID)
 	logger.LogToFile("PeerID: " + reqSent.PeerID)
 
-	stream, err := cp.Host.NewStream(context.Background(), relayID, ChatProtocol)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stream, err := cp.Host.NewStream(ctx, relayID, ChatProtocol)
 	if err != nil {
 		return fmt.Errorf("error opening register stream: %w", err)
 	}
@@ -270,8 +274,11 @@ func (cp *ChatPeer) registerWithRelay(relayID peer.ID) error {
 	if err != nil {
 		return fmt.Errorf("error marshalling register req: %w", err)
 	}
-	stream.Write([]byte(reqJson))
-	time.Sleep(500 * time.Millisecond)
+	_, err = stream.Write([]byte(reqJson))
+	if err != nil {
+		return fmt.Errorf("error writing to register stream: %w", err)
+	}
+
 	fmt.Println("[DEBUG] Registered peer ID with relay successfully:", reqSent.PeerID)
 	return nil
 }
@@ -325,9 +332,15 @@ func (cp *ChatPeer) keepAlive(ctx context.Context, relayInfo peer.AddrInfo) {
 						fmt.Println("[DEBUG] Reconnected transport to relay!")
 						cp.registerWithRelay(relayInfo.ID)
 						client.Reserve(ctx, cp.Host, relayInfo)
+						if cp.OnStatusChange != nil {
+							cp.OnStatusChange("online")
+						}
 						break
 					}
 					fmt.Println("[DEBUG] Failed to reconnect to relay, retrying in 2s...")
+					if i == 2 && cp.OnStatusChange != nil {
+						cp.OnStatusChange("offline")
+					}
 					time.Sleep(2 * time.Second)
 				}
 			} else {
@@ -337,6 +350,9 @@ func (cp *ChatPeer) keepAlive(ctx context.Context, relayInfo peer.AddrInfo) {
 					fmt.Println("[DEBUG] Implicitly reconnected transport to relay!")
 					cp.registerWithRelay(relayInfo.ID)
 					client.Reserve(ctx, cp.Host, relayInfo)
+					if cp.OnStatusChange != nil {
+						cp.OnStatusChange("online")
+					}
 				}
 			}
 		case <-ctx.Done():

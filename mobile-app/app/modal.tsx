@@ -8,6 +8,11 @@ import { useAppStore } from '@/store/useAppStore';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Image } from 'expo-image';
+import PasteInput from '@tbvjaos510/react-native-paste-input';
+import RichTextInput from '../components/RichTextInput';
+
+// Use custom native input on Android to bypass Samsung Keyboard limitations
+const AdaptiveInput = Platform.OS === 'android' ? RichTextInput : PasteInput;
 
 export default function CreateMessageModal() {
   const router = useRouter();
@@ -18,28 +23,62 @@ export default function CreateMessageModal() {
   const [pendingImages, setPendingImages] = useState<string[]>([]); // base64 strings
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const processFile = async (file: { uri: string; fileSize?: number; base64?: string | null }) => {
+    const { uri, fileSize, base64 } = file;
+
+    // Enforce 1MB limit for all image types
+    if (fileSize && fileSize > 1024 * 1024) {
+      Alert.alert('Too Large', 'Images must be smaller than 1 MB to ensure reliable delivery.');
+      return;
+    }
+
+    // Check if it's a GIF
+    const isGif = uri.toLowerCase().endsWith('.gif');
+
+    if (isGif) {
+      if (base64) {
+        setPendingImages((prev: string[]) => [...prev, `data:image/gif;base64,${base64}`]);
+      } else {
+        // If no base64 (common in paste), we might need to fetch it or use manipulation to get it
+        // But manipulator strips animation. So we use fetch for GIFs if base64 is missing.
+        try {
+          const response = await fetch(uri);
+          const blob = await response.blob();
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setPendingImages((prev: string[]) => [...prev, reader.result as string]);
+          };
+          reader.readAsDataURL(blob);
+        } catch (e) {
+          console.error('Failed to convert pasted GIF to base64', e);
+        }
+      }
+    } else {
+      // 1. Resize and compress like desktop (max 800px)
+      const manipResult = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 800 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+
+      if (manipResult.base64) {
+        setPendingImages((prev: string[]) => [...prev, `data:image/jpeg;base64,${manipResult.base64}`]);
+      }
+    }
+  };
+
   const handlePickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: false,
         quality: 1,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         setIsProcessing(true);
-        const { uri } = result.assets[0];
-
-        // 1. Resize and compress like desktop (max 800px)
-        const manipResult = await ImageManipulator.manipulateAsync(
-          uri,
-          [{ resize: { width: 800 } }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-        );
-
-        if (manipResult.base64) {
-          setPendingImages((prev: string[]) => [...prev, `data:image/jpeg;base64,${manipResult.base64}`]);
-        }
+        await processFile(result.assets[0]);
       }
     } catch (e) {
       Alert.alert('Error', 'Failed to pick image');
@@ -47,6 +86,27 @@ export default function CreateMessageModal() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handlePaste = async (error: string | null, files: any[]) => {
+    if (error) {
+      console.error('Paste error:', error);
+      return;
+    }
+    if (files && files.length > 0) {
+      setIsProcessing(true);
+      for (const file of files) {
+        await processFile(file);
+      }
+      setIsProcessing(false);
+    }
+  };
+
+  const handleMediaInserted = async (event: any) => {
+    const { uri, fileSize } = event.nativeEvent;
+    setIsProcessing(true);
+    await processFile({ uri, fileSize, base64: null });
+    setIsProcessing(false);
   };
 
   const removeImage = (index: number) => {
@@ -151,7 +211,7 @@ export default function CreateMessageModal() {
 
         <View style={styles.divider} />
 
-        <TextInput
+        <AdaptiveInput
           style={[styles.inputBody, { color: colors.text, backgroundColor: colors.primary, borderColor: colors.border }]}
           placeholder="What's the gossip?"
           placeholderTextColor={colors.icon}
@@ -159,6 +219,9 @@ export default function CreateMessageModal() {
           textAlignVertical="top"
           value={content}
           onChangeText={setContent}
+          // @ts-ignore - Specific library props
+          onPaste={handlePaste}
+          onMediaInserted={handleMediaInserted}
           autoFocus={!isProcessing}
         />
 

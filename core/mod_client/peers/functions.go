@@ -21,7 +21,7 @@ type RelayDist struct {
 	dist    *big.Int
 }
 
-func StartNode(relayMultiAddrList []string) error {
+func StartNode(relayMultiAddrList []string, onStatusChange func(string)) error {
 
 	fmt.Println("Starting Node...")
 	var err error
@@ -33,12 +33,12 @@ func StartNode(relayMultiAddrList []string) error {
 
 	ctx := context.Background()
 
+	Peer.OnStatusChange = onStatusChange
 	if err := Peer.Start(ctx); err != nil {
 		log.Printf("[ERROR] Peer.Start failed: %v", err)
 		return err
 	}
 	return nil
-	// initDHT()
 }
 
 func GET(targetPeerID string, route string) ([]byte, error) { //"/ts=123&&id=123"

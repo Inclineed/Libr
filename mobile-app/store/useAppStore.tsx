@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useReducer, useCallback, ReactNode, useEffect } from 'react';
 import { AppState as ReactNativeAppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as BackgroundFetch from 'expo-background-fetch';
+import * as TaskManager from 'expo-task-manager';
 import LibrCore, { RetMsgCert } from '@/modules/LibrCore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -117,8 +119,43 @@ const StoreContext = createContext<StoreContextValue | undefined>(undefined);
 const REPORTED_SIGNS_KEY = '@libr_reported_signs';
 const REPORTED_MESSAGES_KEY = '@libr_reported_messages';
 
+// ── Background Task Definition ────────────────────────────────────────────────
+const BACKGROUND_MODERATION_TASK = 'BACKGROUND_MODERATION_TASK';
+
+TaskManager.defineTask(BACKGROUND_MODERATION_TASK, async () => {
+  try {
+    const result = await LibrCore.tickCron();
+    console.log('[BackgroundFetch] Moderation tick result:', result);
+    return result === 'ok' 
+      ? BackgroundFetch.BackgroundFetchResult.NewData 
+      : BackgroundFetch.BackgroundFetchResult.NoData;
+  } catch (error) {
+    console.warn('[BackgroundFetch] Moderation tick failed:', error);
+    return BackgroundFetch.BackgroundFetchResult.Failed;
+  }
+});
+
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Register Background Task
+  useEffect(() => {
+    (async () => {
+      try {
+        const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_MODERATION_TASK);
+        if (!isRegistered) {
+          await BackgroundFetch.registerTaskAsync(BACKGROUND_MODERATION_TASK, {
+            minimumInterval: 15 * 60, // 15 minutes
+            stopOnTerminate: false,
+            startOnBoot: true,
+          });
+          console.log('[BackgroundFetch] Task registered');
+        }
+      } catch (err) {
+        console.warn('[BackgroundFetch] Registration failed:', err);
+      }
+    })();
+  }, []);
 
   // Load reported signs on mount
   useEffect(() => {
@@ -140,7 +177,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (nextAppState === 'active') {
         LibrCore.startCron().catch(console.warn);
       } else if (nextAppState === 'background') {
-        LibrCore.stopCron().catch(console.warn);
+        // We no longer explicitly stop the cron, but it likely will be suspended by OS.
+        // The BackgroundFetch task will wake it up for a "tick" periodically.
+        console.log('[LibrCore] App backgrounded, letting periodic fetch handle cron.');
       }
     });
 

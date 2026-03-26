@@ -561,11 +561,6 @@ export default function ChatScreen() {
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    // Poll for new messages every 30s when connected
-    fetchIntervalRef.current = setInterval(() => {
-      if (state.connectionStatus === 'connected') doFetch();
-    }, 30_000);
-
     // Listen for push messages from libp2p
     const sub = LibrCoreEvents?.addListener('onLibrMessage', () => doFetch());
 
@@ -573,7 +568,6 @@ export default function ChatScreen() {
     initialize();
 
     return () => {
-      if (fetchIntervalRef.current) clearInterval(fetchIntervalRef.current);
       sub?.remove();
     };
   }, [initialize]);

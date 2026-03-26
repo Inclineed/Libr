@@ -79,6 +79,9 @@ interface AppState {
   // Pending moderation queue (persists across tab switches)
   pendingQueue: PendingModeration[];
 
+  // Network state
+  relayStatus: string;
+
   // Actions
   setUser: (user: User) => void;
   setIncognito: (value: boolean) => void;
@@ -91,6 +94,7 @@ interface AppState {
   setLoading: (loading: boolean) => void;
   joinCommunity: (communityId: string) => void;
   setPendingQueue: (queue: PendingModeration[]) => void;
+  setRelayStatus: (status: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -106,6 +110,7 @@ export const useAppStore = create<AppState>()(
       messages: [],
       isLoading: false,
       pendingQueue: [],
+      relayStatus: 'offline',
 
       // Actions
       setUser: (user) => set({ user, isAuthenticated: true }),
@@ -148,6 +153,7 @@ export const useAppStore = create<AppState>()(
       })),
 
       setPendingQueue: (queue) => set({ pendingQueue: queue }),
+      setRelayStatus: (status) => set({ relayStatus: status }),
     }),
     {
       name: 'libr-storage',

@@ -83,8 +83,19 @@ export const MessageInput = forwardRef<HTMLDivElement, MessageInputProps>(
         toast.error('Image must be smaller than 1 MB.');
         return;
       }
+
+      const isGif = file.type === 'image/gif';
+
       const reader = new FileReader();
       reader.onload = (e) => {
+        const dataUrlFromReader = e.target?.result as string;
+
+        if (isGif) {
+          // Bypass canvas for GIFs to preserve animation
+          setPendingImages(prev => [...prev, dataUrlFromReader]);
+          return;
+        }
+
         const img = new window.Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
@@ -110,7 +121,7 @@ export const MessageInput = forwardRef<HTMLDivElement, MessageInputProps>(
             setPendingImages(prev => [...prev, dataUrl]);
           }
         };
-        img.src = e.target?.result as string;
+        img.src = dataUrlFromReader;
       };
       reader.readAsDataURL(file);
     }, []);

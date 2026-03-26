@@ -234,3 +234,8 @@ out/
 # Documentation builds
 site/
 core/db/.env
+
+# Documentation
+docs/db/
+docs/client/
+docs/mod/
